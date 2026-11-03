@@ -11,7 +11,7 @@ from backend.domain.spec import Decision, freeze_spec
 from backend.domain.store import TaskStore, _now
 from backend.jobs.contracts import JobRequest
 
-TERMINAL = (TaskState.CANCELLED, TaskState.FAILED, TaskState.SUCCEEDED, TaskState.VALIDATED)
+TERMINAL = (TaskState.CANCELLED, TaskState.FAILED, TaskState.SUCCEEDED)
 
 
 class WorkflowConflict(ValueError):
@@ -68,6 +68,10 @@ class WorkflowStore:
             db.execute("""CREATE TABLE IF NOT EXISTS workflow_codes(
                 task_id TEXT NOT NULL REFERENCES tasks(task_id), attempt_no INTEGER NOT NULL,
                 code_json TEXT NOT NULL, PRIMARY KEY(task_id,attempt_no))""")
+            db.execute("""CREATE TABLE IF NOT EXISTS workflow_artifacts(
+                task_id TEXT NOT NULL REFERENCES tasks(task_id), artifact_id TEXT NOT NULL,
+                sha256 TEXT NOT NULL, bytes INTEGER NOT NULL, media_type TEXT NOT NULL,
+                PRIMARY KEY(task_id,artifact_id))""")
 
     @contextmanager
     def db(self):

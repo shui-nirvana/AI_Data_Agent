@@ -58,7 +58,9 @@ Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8000/api/tasks/$id/decisio
 Invoke-RestMethod -Uri "http://127.0.0.1:8000/api/tasks/$id" -Headers $headers
 ```
 
-最终状态应为 `VALIDATED`，表示独立 D 通过，但发布/下载还未实现。服务端绑定 actor，客户端不能提交 actor_id、原始发现集、镜像、命令或挂载路径。请求最大 256 KiB，必须完整裁决本任务的发现集合；过期版本/取消/修改已冻结规范返回 409，非法参数返回 422。相同原始版本和相同决策的重复提交返回同一规范哈希。
+最终状态为 `SUCCEEDED`：独立 D 通过并完成发布登记。`VALIDATED/PUBLISHING` 不开放下载。服务端绑定 actor，客户端不能提交 actor_id、原始发现集、镜像、命令或挂载路径。审批最大 256 KiB且须完整裁决；过期/取消/修改冻结规范返回 409，非法参数返回 422，重复相同审批返回同一规范哈希。
+
+页面现已提供同样的上传、启动、审批和下载操作。API 可查询 `/api/tasks/$id/evidence`，下载 `/api/tasks/$id/artifacts/output`、`validation`、`manifest`，均带相同演示令牌。下载返回复核哈希的字节及 `X-Content-SHA256`，不公开宿主路径/源码/日志。
 
 ## 代码生成分支
 
@@ -87,4 +89,4 @@ python -m pytest tests/test_workflow_docker.py -q
 - 若回收失败，worker 停止消费，作业保留 running 供再次对账；不能把孤儿容器当作已清理。需要进程监督/告警和人工检查，尚无独立清扫守护进程。
 - 节点错误以异常类型的固定码记录，不外发字段/原始错误内容；修复只发上一版模型源码和枚举故障。Runner 默认禁用 LangSmith tracing。SQLite 连接在每次短事务后关闭。
 
-仍需在目标 VM 验证进程强杀、真实并发取消、PID/总 CPU、恶意子进程、Docker API 阻塞及多任务情况；当前不能用于敏感数据或公网任意代码执行。
+本地补充了 worker 强杀、真实并发取消、PID/总 CPU/后台进程及 Docker 超时异常注入。三进程监督、就绪/停服/回收与离线维护见 `local_operations.md`。这些不代替目标 VM、永久引擎挂死、多机高可用或生产验收，仍禁止敏感数据/公网任意代码执行。

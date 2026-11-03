@@ -70,7 +70,7 @@ def test_two_repairs_restart_and_distinct_attempts(setup):
     assert len({first["job_id"], second["job_id"], third["job_id"], d["job_id"]}) == 4
     assert [first["attempt_no"], second["attempt_no"], third["attempt_no"], d["attempt_no"]] == [1, 2, 3, 3]
     assert generator.calls == 1 and generator.repairs == ["RUNTIME_ERROR", "MISSING_OUTPUT"]
-    assert store.task(task_id)["state"] == "VALIDATED"
+    assert store.task(task_id)["state"] == "SUCCEEDED"
     with store.db() as db:
         codes = db.execute("SELECT code_json FROM workflow_codes").fetchall()
     assert len({json.loads(c["code_json"])["code_sha256"] for c in codes}) == 3

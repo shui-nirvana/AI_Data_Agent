@@ -51,7 +51,7 @@ def test_upload_is_durable_but_does_not_execute(tmp_path):
         assert api.get(f"/api/tasks/{task['task_id']}", headers=headers).json() == task
         # 未启动/未检测任务不能审批；下载仍未接入。
         assert api.post(f"/api/tasks/{task['task_id']}/decisions", headers=headers).status_code == 409
-        assert api.get(f"/api/tasks/{task['task_id']}/artifacts/output", headers=headers).status_code == 501
+        assert api.get(f"/api/tasks/{task['task_id']}/artifacts/output", headers=headers).status_code == 409
 
 
 def test_rejects_unauthorized_and_oversize_without_persisting(tmp_path):

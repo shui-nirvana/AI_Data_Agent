@@ -2,7 +2,7 @@
 
 ## 当前边界
 
-已有固定镜像、独立 Docker 队列 worker、Graph Runner/审批/outbox、单机文件锁和重启失败式对账，仅用于非敏感开发数据。没有生产 Compose、多机租约或完整服务安装器。Docker socket 权限接近宿主管理员权限，只给 worker，不能挂进 FastAPI/Graph Runner，也不能对公网暴露。
+已有固定镜像、独立 Docker 队列 worker、Graph Runner/审批/outbox、发布下载、本地监督和离线维护，仅用于非敏感开发数据。没有生产 Compose、多机租约或云服务安装器。Docker socket 权限接近宿主管理员权限，只给 worker，不能挂进 FastAPI/Graph Runner，也不能对公网暴露。操作见 `local_operations.md`。
 
 已在本机 Docker Desktop/Linux 构建真实镜像，通过 A/C/D 烟测、五项隔离/压力检查，以及 Graph 审批重启后驱动独立 worker 的两条集成路径；尚无 Vultr 执行证据，也不是完整安全认证。
 
@@ -31,7 +31,7 @@ docker --context desktop-linux info
 
 本机引擎的 archive API 无法读取 tmpfs 文件，因此产物由固定镜像内的可信 `images.collector` 收集：停止遗留子进程、拒绝链接/非普通文件、按固定名字和总限额传回 tar，worker 再暂停/回收容器。没有增加宿主可写挂载或容器权限；D 核验的是保存下来的候选字节。
 
-ARM64 开发机选择 `--platform linux/arm64`；跨架构构建依赖引擎的模拟支持，速度和验收结果不可等同原生执行。当前使用 Python 3.12 基础镜像摘要、固定顶层 Python 依赖版本；传递依赖尚未全量 hash lock。执行阶段不拉取镜像、不安装依赖，仅接受已构建的不可变本地镜像 ID。
+ARM64 开发机选择 `--platform linux/arm64`；跨架构模拟不等于原生验收。构建基础镜像现在固定 digest（受信升级可用 `--base`），沙箱传递依赖使用 `requirements-job.lock` 全量版本/hash。执行阶段不拉镜像、不安装依赖，仅接受不可变本地镜像 ID。锁变化须重建并重测。
 
 正常烟测生成无敏感 CSV，运行三个全新 A/C/D 容器：A 检测、测试规范选择日期动作、C 执行人工源码、D 独立验证。这不是线上审批事务，也不是 LLM 演示。成功时打印 D 改动数；任何作业失败会抛异常并留下该次私有 `execution.json`。
 
@@ -47,7 +47,7 @@ ARM64 开发机选择 `--platform linux/arm64`；跨架构构建依赖引擎的�
 python -m workers.sandbox_manager.isolation_test --stress
 ```
 
-报告为每次测试目录的 `isolation.json`；已完成的检查也会在后续检查失败时保留。PID 耗尽、总 CPU、真实并发取消、恶意子进程、worker 被杀/重启、Docker API 卡住及多任务并发仍需目标机单独验收。SDK 的调用超时不等于已实现崩溃后的自动清理。
+报告为每次测试目录的 `isolation.json`，失败也保留已有记录。新增 `tests/test_local_safety_docker.py` 实测 PID、cgroup 总 CPU、后台子进程、并发取消和 worker 强杀回收；Docker 超时为异常注入，不是永久挂死证据。目标机仍需重测。监督/回收不是内核隔离或多机高可用证明。
 
 ## Vultr 开发包
 
@@ -82,4 +82,4 @@ python3 -m venv .venv
 
 ## 公网开放前
 
-补齐真实认证/上传限流、分布式租约与完整崩溃对账、真实供应商/自愈联调、D 候选内容冻结和发布哈希。DeepSeek 适配器/匿名源码生成/有限自愈已实现并做模拟模型 + 真容器回归，真实 DeepSeek 尚未验收，配置见 `deepseek.md`。只有 D 通过且发布字节一致的候选才可下载；当前 `VALIDATED` 不开放下载。容器共享宿主内核，不能承诺绝对隔离。
+真实模型受控自愈、候选冻结、发布复核/下载已补齐本地实现与测试，配置见 `deepseek.md`。公网前仍须真实认证/代理限流、服务账户、告警、完整崩溃对账和数据合规；多 VM 另补租约与存储协议。只有 `SUCCEEDED` 登记字节可下载，`VALIDATED` 不能。容器共享宿主内核，不承诺绝对隔离；本地证据不替代 Vultr。

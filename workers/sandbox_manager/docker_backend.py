@@ -212,6 +212,7 @@ class DockerExecutionBackend:
                 stdout=False, stderr=False, user="10001:10001",
             )["Id"]
             self.client.api.exec_start(execution, detach=True)
+            last_cpu_check = 0.0
             while True:
                 progress = self.client.api.exec_inspect(execution)
                 if not progress["Running"]:
@@ -224,13 +225,22 @@ class DockerExecutionBackend:
                 if time.monotonic() - started > limits.timeout_seconds:
                     timed_out, limit_reason = True, "wall_timeout"
                     break
+                if time.monotonic() - last_cpu_check >= 0.5:
+                    # cgroup accounting includes all descendants, unlike per-process rlimit.
+                    usage = container.stats(stream=False)["cpu_stats"]["cpu_usage"]["total_usage"]
+                    if type(usage) is not int or usage < 0:
+                        raise ValueError("CPU accounting unavailable")
+                    last_cpu_check = time.monotonic()
+                    if usage >= limits.cpu_seconds * 1_000_000_000:
+                        limit_reason = "cpu_budget"
+                        break
                 time.sleep(0.1)
             container.reload()
             if container.attrs["State"].get("OOMKilled"):
                 limit_reason = "oom"
             with self._lock:
                 cancelled = receipt.handle in self._cancelled
-            if not timed_out and not cancelled and container.attrs["State"].get("Running"):
+            if not timed_out and limit_reason is None and not cancelled and container.attrs["State"].get("Running"):
                 snapshot = collect_snapshot(self.client, container, job.stage, limits)
                 # 收集器已停止遗留子进程，收集完成后冻结整个容器再落盘/回收。
                 container.pause()

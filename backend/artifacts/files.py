@@ -1,5 +1,5 @@
 """
-服务端分配的私有路径管理。目前特意未实现发布功能。
+服务端分配的私有上传路径管理；验证发布由独立 Publisher 实现。
 该模块负责管理输入文件和临时文件的存储路径，确保文件访问的安全性和原子性。
 """
 
@@ -35,10 +35,3 @@ class InputFiles:
         获取任务的上传临时文件路径（.part）。
         """
         return self.root / f"{UUID(task_id)}.part"
-
-    def publish(self, *_args: object, **_kwargs: object) -> None:
-        """
-        发布产物。
-        注意：只有经过 D 验证且绑定哈希的文件才允许发布。
-        """
-        raise NotImplementedError("只有经过 D 验证且绑定哈希的文件才允许发布")

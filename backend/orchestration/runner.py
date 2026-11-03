@@ -13,6 +13,11 @@ class GraphRunner:
     def __init__(self, root: Path, generator=None):
         self.store = WorkflowStore(root)
         self.generator = generator
+        # Older checkpoints ended at VALIDATED; revalidate their stored D binding
+        # rather than silently treating them as already published.
+        with self.store.db() as db:
+            for row in db.execute("SELECT task_id FROM tasks WHERE state IN ('VALIDATED','PUBLISHING')"):
+                self.store.wake(db, row["task_id"], f"publish:{row['task_id']}")
 
     def run_once(self) -> bool:
         # SQLite checkpoint 的同一 thread_id 不允许被两个本地进程同时推进。
@@ -53,9 +58,14 @@ class GraphRunner:
                 try:
                     if snapshot.next or invocation is not None:
                         graph.invoke(invocation, config)
+                    elif task["state"] in ("VALIDATED", "PUBLISHING"):
+                        from backend.artifacts.publication import Publisher
+                        Publisher(self.store).publish(task_id)
                 except Exception as exc:
                     # 源数据、字段名、模型异常消息都不写入公开事件。
-                    self.store.fail(task_id, type(exc).__name__)
+                    from backend.artifacts.publication import ArtifactIntegrityError
+                    code = str(exc) if isinstance(exc, ArtifactIntegrityError) else type(exc).__name__
+                    self.store.fail(task_id, code)
             # 先提交 checkpoint 再 ack。崩溃后重复事件只恢复已持久化的游标。
             self.store.ack(event["id"])
             return True
@@ -73,7 +83,9 @@ def main() -> None:
         print(f"outbox processed={runner.run_once()}")
         return
     try:
+        from backend.local_runtime import heartbeat
         while True:
+            heartbeat(runner.store.root, "runner")
             if not runner.run_once():
                 time.sleep(0.5)
     except KeyboardInterrupt:

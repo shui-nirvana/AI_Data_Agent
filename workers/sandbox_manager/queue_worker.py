@@ -1,6 +1,7 @@
 """独立 Docker 队列 worker。只有本进程持有运行时权限；不运行 LangGraph。"""
 
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -81,7 +82,11 @@ class QueueWorker:
                 if status.result_ref:
                     manifest = read_json(Path(status.result_ref))
                     if (manifest.get("task_id") != job.task_id or manifest.get("attempt_id") != job.attempt_id
-                            or manifest.get("code_sha256") != job.code_sha256):
+                            or manifest.get("code_sha256") != job.code_sha256
+                            or manifest.get("input_sha256") != job.input_sha256
+                            or manifest.get("spec_sha256") != job.spec_sha256
+                            or manifest.get("candidate_sha256") != job.candidate_sha256
+                            or manifest.get("stage") != job.stage.value):
                         raise ValueError("运行回报归属不匹配")
                     category = manifest.get("runtime_category")
                     # 默认不修复。仅 C 的明确运行故障/正常退出缺文件可进入新源码分支。
@@ -99,7 +104,26 @@ class QueueWorker:
                         "timed_out": manifest.get("timed_out"),
                         "limit_reason": manifest.get("limit_reason"),
                         "runtime_category": category,
+                        "image_id": manifest.get("image_id"),
+                        "elapsed_seconds": manifest.get("elapsed_seconds"),
                     }
+                    if (job.stage == Stage.VERIFY_D and status.state == "failed"
+                            and manifest.get("exit_code") == 1
+                            and manifest.get("limit_reason") is None
+                            and not manifest.get("timed_out") and manifest.get("error_code") is None):
+                        path = self.backend.root / job.attempt_id / "diagnostics" / "validation.json"
+                        if path.is_file() and path.stat().st_size <= 1_000_000:
+                            data = path.read_bytes()
+                            report = json.loads(data)
+                            if (hashlib.sha256(data).hexdigest() == manifest.get("artifact_hashes", {}).get("validation.json")
+                                    and report.get("verdict") == "rejected"
+                                    and report.get("spec_sha256") == job.spec_sha256
+                                    and report.get("output_sha256") == job.candidate_sha256):
+                                error_code = "VALIDATION_REJECTED"
+                                evidence["validation"] = {k: report.get(k) for k in (
+                                    "schema_version", "validator_version", "verdict",
+                                    "input_sha256", "spec_sha256", "output_sha256",
+                                    "changed_cells", "mismatch_count", "checks")}
                 result_dir = str(self.backend.root / job.attempt_id / "result") if status.state == "finished" else None
                 self.store.finish_job(job.attempt_id, status.state, result_dir,
                                       error_code, evidence)
@@ -122,15 +146,22 @@ def main():
                         default=Path(os.environ.get("AI_AGENT_DATA_DIR", ".runtime")))
     parser.add_argument("--images", type=Path, default=Path(".runtime/docker/images.json"))
     parser.add_argument("--once", action="store_true")
+    parser.add_argument("--recover-only", action="store_true", help="Reclaim old attempts without consuming jobs")
     args = parser.parse_args()
     configuration = read_json(args.images)
     worker = QueueWorker(args.data_dir,
                          {Stage(key): value for key, value in configuration["images"].items()})
+    if args.recover_only:
+        with process_lock(worker.store.root, "docker-worker"):
+            worker.recover_interrupted()
+        return
     if args.once:
         print(f"job processed={worker.run_once()}")
         return
     try:
+        from backend.local_runtime import heartbeat
         while True:
+            heartbeat(worker.store.root, "worker")
             if not worker.run_once():
                 time.sleep(0.5)
     except KeyboardInterrupt:

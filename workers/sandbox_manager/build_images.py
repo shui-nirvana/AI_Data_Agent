@@ -17,6 +17,8 @@ def bundle_sources(root: Path, target: Path, manifest: dict) -> None:
                      if path.is_file() and "__pycache__" not in path.parts
                      and (path.suffix in (".py", ".md", ".html", ".css", ".js")
                           or path.name == "Dockerfile.job"))
+    files.extend(path for path in (root / "deploy").glob("*")
+                 if path.suffix in (".lock", ".in"))
     with zipfile.ZipFile(target, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         for path in sorted(set(files)):
             relative = path.relative_to(root)
@@ -37,6 +39,8 @@ def main() -> None:
                         default="linux/amd64", help="必须与目标 VM 的 CPU 架构一致")
     parser.add_argument("--output", type=Path, default=Path(".runtime/docker"))
     parser.add_argument("--export", action="store_true", help="导出镜像 tar 和白名单源码 zip")
+    parser.add_argument("--base", default="python@sha256:aa943ce411423c7582288f18707ff66eddcbaeb510502d747a72aeb34f30d159",
+                        help="Trusted Python base image pinned by digest")
     args = parser.parse_args()
     import docker
     client = docker.from_env(timeout=120)
@@ -44,7 +48,10 @@ def main() -> None:
         raise SystemExit("需要 Linux Docker 引擎")
     root = Path(__file__).resolve().parents[2]
     # 构建时网络允许；执行时只用本地 ID，不自动拉取镜像/依赖。
-    base = client.images.pull("python:3.12-slim", platform=args.platform)
+    import re
+    if not re.fullmatch(r"[a-zA-Z0-9./_-]+@sha256:[0-9a-f]{64}", args.base):
+        raise SystemExit("基础镜像必须使用不可变摘要")
+    base = client.images.pull(args.base, platform=args.platform)
     digests = base.attrs.get("RepoDigests", [])
     if not digests:
         raise SystemExit("未获取基础镜像摘要")

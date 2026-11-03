@@ -4,9 +4,12 @@
 """
 
 import os
+import asyncio
+from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Header, HTTPException
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from backend.api.tasks import task_router
@@ -49,7 +52,26 @@ def create_app(
     if os.name != "nt":
         root.chmod(0o700) # 仅所有者可读写执行
 
-    app = FastAPI(title="AI Data Agent", version="0.1.0")
+    from backend.local_runtime import heartbeat, readiness
+
+    @asynccontextmanager
+    async def lifespan(app):
+        async def pulse():
+            while True:
+                heartbeat(root, "api")
+                await asyncio.sleep(2)
+        job = asyncio.create_task(pulse())
+        try:
+            yield
+        finally:
+            job.cancel()
+            try:
+                await job
+            except asyncio.CancelledError:
+                pass
+            (root / "services" / "api.json").unlink(missing_ok=True)
+
+    app = FastAPI(title="AI Data Agent", version="0.1.0", lifespan=lifespan)
     app.state.dependencies = services
     
     # 初始化存储层和文件管理层
@@ -63,6 +85,14 @@ def create_app(
     def health():
         """健康检查接口，用于监控服务状态"""
         return {"status": "scaffold", "execution_enabled": False}
+
+    @app.get("/ready")
+    def ready(x_demo_token: str | None = Header(None)):
+        import hmac
+        if x_demo_token is None or not hmac.compare_digest(token, x_demo_token):
+            raise HTTPException(401, "无效的演示令牌")
+        result = readiness(root)
+        return JSONResponse(result, status_code=200 if result["ready"] else 503)
 
     # 挂载前端 Web 页面
     web = Path(__file__).resolve().parent.parent / "web"

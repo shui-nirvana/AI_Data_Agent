@@ -64,7 +64,8 @@ class TaskStore:
             db.close()
 
     def create(
-        self, task_id: str, owner_id: str, goal: str, digest: str, size: int
+        self, task_id: str, owner_id: str, goal: str, digest: str, size: int,
+        max_active: int | None = None,
     ) -> TaskRecord:
         """
         在数据库中创建新任务和初始事件。
@@ -78,6 +79,11 @@ class TaskStore:
         """
         created_at = _now()
         with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            if max_active is not None and db.execute(
+                "SELECT count(*) FROM tasks WHERE state NOT IN ('SUCCEEDED','FAILED','CANCELLED')"
+            ).fetchone()[0] >= max_active:
+                raise OverflowError("TASK_CAPACITY")
             db.execute(
                 "INSERT INTO tasks VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 (task_id, owner_id, goal, TaskState.UPLOADED, digest, size, 1, created_at),

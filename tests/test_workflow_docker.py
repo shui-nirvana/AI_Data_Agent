@@ -84,7 +84,7 @@ def test_real_graph_approval_restart_and_independent_worker(tmp_path, change):
     worker()
     runner()
     store = WorkflowStore(tmp_path)
-    assert store.task(task_id)["state"] == "VALIDATED"
+    assert store.task(task_id)["state"] == "SUCCEEDED"
     validation = json.loads(store.flow(task_id)["validation_json"])
     assert validation["changed_cells"] == int(change)
     assert len(generator_calls) == int(change)

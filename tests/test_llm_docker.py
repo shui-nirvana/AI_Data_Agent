@@ -1,6 +1,8 @@
 """真实 Docker 执行生成器产物。默认跳过；live 另需显式授权和配置密钥。"""
 
 import json
+import hashlib
+from dataclasses import replace
 import os
 from pathlib import Path
 import subprocess
@@ -24,7 +26,7 @@ pytestmark = pytest.mark.skipif(os.environ.get("AI_AGENT_RUN_DOCKER_TESTS") != "
                                 reason="Requires explicit real Docker opt-in")
 
 
-@pytest.mark.parametrize("mode", ["repair", "missing", "security", "d_reject", "live_date", "live_fill"])
+@pytest.mark.parametrize("mode", ["repair", "missing", "security", "d_reject", "live_date", "live_fill", "live_repair"])
 def test_generator_and_new_containers(tmp_path, mode):
     live = mode.startswith("live")
     if live and (os.environ.get("AI_AGENT_RUN_LIVE_LLM_TESTS") != "1"
@@ -60,6 +62,24 @@ def test_generator_and_new_containers(tmp_path, mode):
 
     client = DeepSeekClient.from_environment(os.environ.get("AI_AGENT_LLM_MODEL")) if live else MockModel()
     generator = LLMCodeGenerator(tmp_path, ModelGateway(client))
+    if mode == "live_repair":
+        original_generator = generator
+
+        class ControlledFault:
+            async def generate(self, spec_ref, profile_ref):
+                version = await original_generator.generate(spec_ref, profile_ref)
+                # Explicit test-only fault after real generation, not a natural model failure.
+                source = "raise RuntimeError('CONTROLLED_TEST_FAULT')\n" + Path(version.source_ref).read_text(encoding="utf-8")
+                path = Path(version.source_ref).parent / "controlled-fault.py"
+                path.write_text(source, encoding="utf-8", newline="")
+                return replace(version, source_ref=str(path),
+                               code_sha256=hashlib.sha256(source.encode()).hexdigest(),
+                               generation_kind="test_fault_injected_after_llm")
+
+            async def repair(self, *args):
+                return await original_generator.repair(*args)
+
+        generator = ControlledFault()
 
     def runner():
         assert GraphRunner(tmp_path, generator).run_once()
@@ -98,17 +118,19 @@ def test_generator_and_new_containers(tmp_path, mode):
     store = WorkflowStore(tmp_path)
     # C 可能触发最多两次合法修复；每次有候选才启动 D。
     for _ in range(4):
-        if store.task(task_id)["state"] in ("FAILED", "VALIDATED", "CANCELLED"):
+        if store.task(task_id)["state"] in ("FAILED", "SUCCEEDED", "CANCELLED"):
             break
         worker()
         runner()
-    assert store.task(task_id)["state"] == ("FAILED" if mode in ("security", "d_reject") else "VALIDATED")
+    assert store.task(task_id)["state"] == ("FAILED" if mode in ("security", "d_reject") else "SUCCEEDED")
     with store.db() as db:
         jobs = db.execute("SELECT * FROM workflow_jobs ORDER BY rowid").fetchall()
     stages = [job["stage"] for job in jobs]
     if live:
         assert stages[0] == "PROFILE_A" and stages[-1] == "VERIFY_D"
         assert 1 <= len(stages[1:-1]) <= 3 and set(stages[1:-1]) == {"CLEAN_C"}
+        if mode == "live_repair":
+            assert len(stages[1:-1]) >= 2
     else:
         assert stages == (["PROFILE_A", "CLEAN_C"] if mode == "security" else
                           ["PROFILE_A", "CLEAN_C", "CLEAN_C", "VERIFY_D"] if mode in ("repair", "missing")
@@ -120,3 +142,9 @@ def test_generator_and_new_containers(tmp_path, mode):
         code = json.loads(store.flow(task_id)["code_json"])
         assert code["provider"] == "deepseek" and code["generation_kind"] in ("llm_generate", "llm_repair")
         assert json.loads(store.flow(task_id)["validation_json"])["changed_cells"] == 1
+    download = api.get(f"/api/tasks/{task_id}/artifacts/output", headers=headers)
+    assert download.status_code == (409 if mode in ("security", "d_reject") else 200)
+    if mode == "d_reject":
+        evidence = api.get(f"/api/tasks/{task_id}/evidence", headers=headers).json()
+        assert evidence["validation"]["verdict"] == "rejected"
+        assert evidence["attempts"][-1]["error_code"] == "VALIDATION_REJECTED"

@@ -102,8 +102,9 @@ def test_durable_interrupt_restart_and_zero_change(setup):
     job = simulated_worker(root)
     assert job["stage"] == Stage.VERIFY_D
     assert GraphRunner(root).run_once()
-    assert api.get(f"/api/tasks/{task_id}", headers=HEADERS).json()["state"] == "VALIDATED"
-    assert api.get(f"/api/tasks/{task_id}/artifacts/output", headers=HEADERS).status_code == 501
+    assert api.get(f"/api/tasks/{task_id}", headers=HEADERS).json()["state"] == "SUCCEEDED"
+    assert api.get(f"/api/tasks/{task_id}/artifacts/output", headers=HEADERS).content == (
+        root / "inputs" / f"{task_id}.csv").read_bytes()
     # 重放全部旧 outbox，不触发新的 A/C/D，也不能回退状态。
     store = WorkflowStore(root)
     with store.db() as db:
@@ -148,7 +149,7 @@ def test_generation_port_c_and_d_are_distinct_and_replay_is_idempotent(setup):
     assert d_job["stage"] == Stage.VERIFY_D and c_job["job_id"] != d_job["job_id"]
     assert GraphRunner(root, generator).run_once()
     assert generator.calls == 1
-    assert WorkflowStore(root).task(task_id)["state"] == "VALIDATED"
+    assert WorkflowStore(root).task(task_id)["state"] == "SUCCEEDED"
 
 
 def test_missing_model_fails_without_host_fallback(setup):

@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import TypedDict
 
 from backend.domain.models import TaskState
+from backend.artifacts.publication import Publisher, freeze_candidate
 from backend.domain.spec import Action, FrozenSpec
 from backend.jobs.contracts import Stage
 from backend.llm.generator import CodeVersion, UnconfiguredGenerator
@@ -183,6 +184,7 @@ def build_graph(checkpointer: object, store: WorkflowStore, generator=None):
         source = store.root / "inputs" / f"{task_id}.csv"
         candidate = private(state.get("candidate_ref", str(source)))
         candidate_digest = state.get("candidate_sha256", state["input_sha256"])
+        candidate = freeze_candidate(store.root, task_id, candidate, candidate_digest)
         job = new_job(task_id, Stage.VERIFY_D, state["input_sha256"],
                       spec_sha256=state["spec_sha256"], candidate_sha256=candidate_digest)
         result = successful_result(wait_job(
@@ -206,6 +208,10 @@ def build_graph(checkpointer: object, store: WorkflowStore, generator=None):
         return {"candidate_ref": str(candidate), "candidate_sha256": candidate_digest,
                 "validation_ref": str(result / "validation.json")}
 
+    def publish(state):
+        Publisher(store).publish(state["task_id"])
+        return {}
+
     # 初始化状态图
     graph = StateGraph(GraphState)
     
@@ -217,6 +223,7 @@ def build_graph(checkpointer: object, store: WorkflowStore, generator=None):
         ("execute", execute),
         ("repair", repair),
         ("validate", validate),
+        ("publish", publish),
     ):
         graph.add_node(name, node)
         
@@ -228,6 +235,7 @@ def build_graph(checkpointer: object, store: WorkflowStore, generator=None):
     graph.add_conditional_edges("execute", lambda state: "repair" if state.get("repair_error") else "validate",
                                 {"repair": "repair", "validate": "validate"})
     graph.add_edge("repair", "execute")
-    graph.add_edge("validate", END)
+    graph.add_edge("validate", "publish")
+    graph.add_edge("publish", END)
     
     return graph.compile(checkpointer=checkpointer)

@@ -4,7 +4,8 @@ FROM ${PYTHON_BASE}
 WORKDIR /app
 ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
 # 依赖仅在构建时安装，作业运行期间无网络/无依赖安装。
-RUN pip install --no-cache-dir pydantic==2.12.5 pandas==2.2.3
+COPY deploy/requirements-job.lock /app/requirements-job.lock
+RUN pip install --no-cache-dir --require-hashes -r /app/requirements-job.lock
 COPY backend/domain /app/backend/domain
 COPY backend/__init__.py /app/backend/__init__.py
 COPY images /app/images

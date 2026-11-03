@@ -84,6 +84,12 @@ Keep every row in its original position, every column and every unapproved cell 
 Missing means exactly empty string: whitespace and NA are NOT missing.
 normalize_date: transform only FULL ASCII fixed-width matches of approved input_formats
 YYYY-MM-DD, YYYY/MM/DD, DD-MM-YYYY; check a valid calendar date; output YYYY-MM-DD.
+These format names are protocol labels, NOT Python strftime/strptime directives.
+Never pass params.output_format ("YYYY-MM-DD") to strftime: that returns literal
+letters, not a date. Build datetime.date(year, month, day), then use isoformat().
+For example, an approved YYYY/MM/DD value "2026/10/31" becomes "2026-10-31",
+not "YYYY-MM-DD"; a value "2026/02/30" stays exactly "2026/02/30".
+Use re.fullmatch rather than match with $ so trailing newlines cannot match.
 Impossible dates and all unparseable/unsupported values stay unchanged.
 fill_null_with_literal: replace ONLY empty strings, load literal from the runtime decision params.
 Each column has at most one rule. preserve and columns without rules remain unchanged.

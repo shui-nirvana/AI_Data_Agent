@@ -56,6 +56,9 @@ class Container:
     def reload(self):
         pass
 
+    def stats(self, stream=False):
+        return {"cpu_stats": {"cpu_usage": {"total_usage": 0}}}
+
     def pause(self):
         self.paused = True
 

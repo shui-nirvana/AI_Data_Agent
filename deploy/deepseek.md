@@ -41,7 +41,7 @@ API 终端保持 `AI_AGENT_LLM_PROVIDER=disabled`，不加载有密钥的 DeepSe
 
 只给系统固定读写协议、批准动作、匿名列索引、聚合计数和格式信息。不提供原始 CSV、行级样例、真实列名、用户身份、目标自由文本、宿主路径、真实填充值。匿名摘要的 `approved_rules` 不是容器文件结构；提示词另外提供无真实数据的 `spec.json` 结构示例，要求 C 在运行时从只读规范的 `columns` 和 `decisions` 读取真实列名、动作和参数。扫描统计只提供背景，不能授权额外操作。
 
-`AI_AGENT_LLM_ALLOW_EXTERNAL=true` 是当前受控单用户演示的操作员授权，不等于已实现多用户隐私同意界面或合规保证。匿名计数仍属于外发信息；只使用无敏感金样本，不公开服务。修复只发送上一版模型源码和枚举故障码，不外发原始 stdout/stderr、异常消息和 CSV 值。
+`AI_AGENT_LLM_ALLOW_EXTERNAL=true` 是受控单用户演示的操作员授权；页面另要求审批/隐私确认，但不等于生产多用户同意或合规保证。匿名计数仍是外发信息；只使用无敏感金样本，不公开服务。修复只发送上一版模型源码和枚举故障码，不外发原始 stdout/stderr、异常消息和 CSV 值。
 
 模型返回完整 JSON：
 
@@ -63,7 +63,7 @@ API 终端保持 `AI_AGENT_LLM_PROVIDER=disabled`，不加载有密钥的 DeepSe
 - 超时/OOM、安全违规、权限/输入错误、收集/写盘/回收错误、失联 worker、未绑定的回报默认停止。D 拒绝绝不进入修复，也不修改已批准规范。
 - C 的审计钩子额外记录明显网络/进程/文件违规，即使脚本吞掉异常也按违规处理。钩子和错误类别不能视为对任意恶意 Python 的认证证明，容器共享内核且还需完整攻击验收。
 - 固定收集器保留有界诊断；原始日志只存本地，不交给模型。worker 回报安全类别/退出码/哈希，Graph 再检查归属和预算。
-- C3 再失败则任务 FAILED；成功 D 后仍只到 `VALIDATED`，发布/下载待实现。
+- C3 再失败则 FAILED；D 通过后进入 `VALIDATED -> PUBLISHING -> SUCCEEDED`。只有发布器重新核对哈希并登记的字节可以鉴权下载；D 拒绝报告以安全摘要展示，不进入修复。
 
 ## 持久化与重启
 
@@ -88,7 +88,7 @@ $env:AI_AGENT_RUN_DOCKER_TESTS = "1"
 python -m pytest tests/test_llm_docker.py -q
 ```
 
-真实 DeepSeek + 新 C/D 两组金样本（会外发匿名信息并消耗 API 费用）：
+真实 DeepSeek + 新 C/D 三组金样本（会外发匿名信息并消耗 API 费用）：
 
 ```powershell
 $env:DOCKER_HOST = "npipe:////./pipe/dockerDesktopLinuxEngine"
@@ -101,6 +101,6 @@ $env:AI_AGENT_LLM_PROVIDER = "disabled"
 python -m pytest tests/test_llm_docker.py -q -k live
 ```
 
-两组分别批准日期规范化、明确字面值填空，保存真实模型源码并由 D 逐格核验。模拟模型的修复证据不冒充真实 DeepSeek 自愈；真实 DeepSeek 的修复效果还需可控故障实测。是否已运行以 `implementation_status.md` 为准。
+三组分别是日期规范化、明确填空，以及真实生成后人工注入运行错误、由真实模型修复再经新 C/D 发布。注入版本标记 `test_fault_injected_after_llm`，不能称为自然模型失败；自然 D 拒绝不自动修复。提示词明确 `YYYY-MM-DD` 是协议标签而不是 `strftime` 参数，合法日期用 `date.isoformat()`，完整匹配用 `re.fullmatch`。实测含先前日期拒绝与后续通过记录，见 `implementation_status.md`。
 
 官方资料：[快速开始](https://api-docs.deepseek.com/)、[Chat Completion](https://api-docs.deepseek.com/api/create-chat-completion)。
