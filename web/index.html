@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AI Data Agent | 项目骨架</title>
+    <!-- 引入基础样式 -->
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <main>
+      <header>
+        <!-- 比赛背景说明 -->
+        <span class="eyebrow">Vultr Hackathon / Implementation Scaffold</span>
+        <h1>AI Data Agent</h1>
+        <p>
+          本页面负责上传登记和状态查询。固定检测与独立验证由独立
+          Graph Runner 和 Docker worker 执行；启动和审批目前通过 API 操作，真实 LLM 尚未接入。
+        </p>
+      </header>
+
+      <!-- 任务创建区域 -->
+      <section aria-labelledby="upload-heading">
+        <h2 id="upload-heading">创建任务</h2>
+        <form id="upload-form">
+          <!-- 身份验证令牌输入 -->
+          <label for="token">演示访问令牌</label>
+          <input
+            id="token"
+            type="password"
+            required
+            autocomplete="off"
+            placeholder="与服务端配置一致"
+          />
+
+          <!-- 业务目标输入 -->
+          <label for="goal">业务目标</label>
+          <textarea
+            id="goal"
+            required
+            maxlength="500"
+            rows="3"
+            placeholder="例如：规范明确格式的日期，保留退款记录"
+          ></textarea>
+
+          <!-- 文件选择 -->
+          <label for="file">CSV 文件</label>
+          <input id="file" type="file" accept=".csv,text/csv" required />
+
+          <button type="submit">上传并登记</button>
+        </form>
+        <p class="note">
+          仅用于本地非敏感演示数据。当前接口使用原始 CSV
+          请求体；API 不解析 CSV 或执行代码，上传本身不会自动启动作业。
+        </p>
+      </section>
+
+      <!-- 任务状态监控区域 -->
+      <section aria-labelledby="status-heading">
+        <h2 id="status-heading">任务状态</h2>
+        <p id="status" role="status" aria-live="polite">尚未创建任务。</p>
+        <!-- 刷新按钮，任务创建后显示 -->
+        <button id="refresh" type="button" hidden>刷新状态</button>
+        <!-- 显示详细的 JSON 元数据 -->
+        <pre id="details" aria-label="任务元数据"></pre>
+      </section>
+    </main>
+    <!-- 引入交互逻辑脚本 -->
+    <script src="/app.js" defer></script>
+  </body>
+</html>
