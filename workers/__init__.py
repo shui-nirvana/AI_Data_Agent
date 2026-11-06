@@ -1,3 +1,3 @@
-"""
-隔离执行 Worker；绝不要由 API 模块导入。
+"""Isolated execution worker; API modules must never import it.
+
 """

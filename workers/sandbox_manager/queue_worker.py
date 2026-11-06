@@ -1,4 +1,4 @@
-"""独立 Docker 队列 worker。只有本进程持有运行时权限；不运行 LangGraph。"""
+"""Independent Docker queue worker with runtime privileges; it does not run LangGraph."""
 
 import argparse
 import hashlib
@@ -12,13 +12,20 @@ from backend.domain.models import TaskState
 from backend.jobs.contracts import JobRequest, Stage
 from backend.jobs.execution import ExecutionReceipt
 from backend.jobs.policy import LIMITS
+from backend.llm.diagnostics import verified_diagnostic
+from backend.llm.generator import check_source
 from backend.orchestration.contracts import read_json
 from backend.orchestration.store import WorkflowStore, process_lock
-from workers.sandbox_manager.docker_backend import DockerExecutionBackend
+from workers.sandbox_manager.docker_backend import DockerExecutionBackend, UnreclaimedSandbox
+from workers.sandbox_manager.watchdog import reclaim
 
 
-class UnreclaimedSandbox(RuntimeError):
-    """容器回收未证实成功，必须停止 worker，不能继续消费下一作业。"""
+def marker_exists(path: Path) -> bool:
+    try:
+        path.lstat()
+        return True
+    except FileNotFoundError:
+        return False
 
 
 class QueueWorker:
@@ -29,16 +36,39 @@ class QueueWorker:
         )
 
     def recover_interrupted(self):
-        """单 worker 文件锁内，旧 running 作业先回收后失败，不重新执行旧 C。"""
+        """Under the single-worker lock, reclaim old running attempts before failing them; never rerun old C."""
         with self.store.db() as db:
-            rows = db.execute("SELECT job_id FROM workflow_jobs WHERE state='running'").fetchall()
+            rows = db.execute("SELECT job_id, task_id FROM workflow_jobs WHERE state='running'").fetchall()
         for row in rows:
-            containers = self.backend.client.containers.list(
-                all=True, filters={"label": f"ai-data-agent.attempt={row['job_id']}"}
-            )
-            for container in containers:
-                container.remove(force=True)
+            directory = self.store.root / "worker_jobs" / row["job_id"]
+            pending = directory / "creation.pending"
+            if (marker_exists(directory) and not marker_exists(directory / "watchdog.ready")
+                    and not marker_exists(directory / "watchdog.done")):
+                # Old versions and interrupted watchdog startup cannot prove
+                # whether the Docker create request was dispatched.
+                pending.touch(exist_ok=True)
+            reclaim(self.backend.client, row["task_id"], row["job_id"])
+            if marker_exists(pending):
+                raise UnreclaimedSandbox(
+                    f"作业 {row['job_id']} 的容器创建结果不确定，需先重启 Docker 并人工确认后对账"
+                )
+            if marker_exists(directory):
+                (directory / "watchdog.done").touch()
             self.store.finish_job(row["job_id"], "failed", None, "WORKER_RESTARTED")
+
+    def resolve_uncertain(self, attempt_id: str):
+        """Call only after the operator confirms Docker restarted and old create requests are no longer in flight."""
+        from uuid import UUID
+        attempt_id = str(UUID(attempt_id))
+        row = self.store.job(attempt_id)
+        directory = self.store.root / "worker_jobs" / attempt_id
+        marker = directory / "creation.pending"
+        if row is None or row["state"] != "running" or not marker.is_file():
+            raise ValueError("没有待确认的不确定创建作业")
+        reclaim(self.backend.client, row["task_id"], attempt_id)
+        marker.unlink()
+        (directory / "watchdog.done").touch()
+        self.store.finish_job(attempt_id, "failed", None, "CREATION_UNCERTAIN_RECONCILED")
 
     def run_once(self) -> bool:
         with process_lock(self.store.root, "docker-worker"):
@@ -58,7 +88,7 @@ class QueueWorker:
                         try:
                             self.backend.cancel(receipt)
                         except Exception:
-                            # submit 的 finally 仍需回收；回报事务拒绝取消后的成功。
+                            # The submit finally block must still reclaim; the reporting transaction rejects success after cancellation.
                             pass
 
             watcher = None
@@ -71,6 +101,11 @@ class QueueWorker:
                     self.store.finish_job(job.attempt_id, "cancelled", None, None)
                     return True
                 self.backend.prepare(job, sources)
+                if job.stage == Stage.CLEAN_C:
+                    snapshot = self.backend.root / job.attempt_id / "input" / "clean.py"
+                    with snapshot.open("rb") as stream:
+                        source = stream.read(32769)
+                    check_source(source.decode("utf-8"))
                 watcher = threading.Thread(target=observe_cancellation, daemon=True)
                 watcher.start()
                 receipt = self.backend.submit(job, LIMITS[job.stage])
@@ -89,7 +124,7 @@ class QueueWorker:
                             or manifest.get("stage") != job.stage.value):
                         raise ValueError("运行回报归属不匹配")
                     category = manifest.get("runtime_category")
-                    # 默认不修复。仅 C 的明确运行故障/正常退出缺文件可进入新源码分支。
+                    # Do not repair by default; only explicit C runtime failures or missing output after normal exit may enter repair.
                     if (job.stage == Stage.CLEAN_C and status.state == "failed"
                             and not manifest.get("timed_out") and manifest.get("limit_reason") is None
                             and manifest.get("error_code") is None):
@@ -107,6 +142,30 @@ class QueueWorker:
                         "image_id": manifest.get("image_id"),
                         "elapsed_seconds": manifest.get("elapsed_seconds"),
                     }
+                    snapshot_ref = manifest.get("executed_source_ref")
+                    snapshot_hash = manifest.get("executed_source_sha256")
+                    if job.stage == Stage.CLEAN_C and snapshot_ref is not None:
+                        expected = self.backend.root / job.attempt_id / "input" / "clean.py"
+                        snapshot = Path(snapshot_ref)
+                        if (snapshot != expected or snapshot.is_symlink() or not snapshot.is_file()
+                                or not snapshot.resolve().is_relative_to(self.store.root)):
+                            raise ValueError("执行源码快照归属不匹配")
+                        with snapshot.open("rb") as stream:
+                            code = stream.read(262145)
+                        if len(code) > 262144 or hashlib.sha256(code).hexdigest() != snapshot_hash:
+                            raise ValueError("执行源码快照哈希不匹配")
+                        evidence["executed_source_ref"] = str(snapshot)
+                        evidence["executed_source_sha256"] = snapshot_hash
+                    elif error_code in ("RUNTIME_ERROR", "MISSING_OUTPUT"):
+                        raise ValueError("缺少失败作业的执行源码快照")
+                    if error_code == "RUNTIME_ERROR":
+                        try:
+                            source = code.decode("utf-8")
+                        except UnicodeDecodeError:
+                            source = ""
+                        diagnostic = verified_diagnostic(manifest.get("runtime_diagnostic"), source)
+                        if diagnostic is not None:
+                            evidence["runtime_diagnostic"] = diagnostic
                     if (job.stage == Stage.VERIFY_D and status.state == "failed"
                             and manifest.get("exit_code") == 1
                             and manifest.get("limit_reason") is None
@@ -147,10 +206,18 @@ def main():
     parser.add_argument("--images", type=Path, default=Path(".runtime/docker/images.json"))
     parser.add_argument("--once", action="store_true")
     parser.add_argument("--recover-only", action="store_true", help="Reclaim old attempts without consuming jobs")
+    parser.add_argument("--resolve-uncertain", metavar="ATTEMPT_ID")
+    parser.add_argument("--confirm-daemon-restarted", action="store_true")
     args = parser.parse_args()
     configuration = read_json(args.images)
     worker = QueueWorker(args.data_dir,
                          {Stage(key): value for key, value in configuration["images"].items()})
+    if args.resolve_uncertain:
+        if not args.confirm_daemon_restarted:
+            parser.error("--resolve-uncertain requires --confirm-daemon-restarted")
+        with process_lock(worker.store.root, "docker-worker"):
+            worker.resolve_uncertain(args.resolve_uncertain)
+        return
     if args.recover_only:
         with process_lock(worker.store.root, "docker-worker"):
             worker.recover_interrupted()

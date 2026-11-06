@@ -1,4 +1,4 @@
-"""单机 SQLite 编排存储。事务只存元数据，不解析 CSV、不持有运行时权限。"""
+"""Single-host SQLite orchestration store. Transactions store metadata only, without CSV parsing or runtime privileges."""
 
 from contextlib import contextmanager
 import json
@@ -15,7 +15,7 @@ TERMINAL = (TaskState.CANCELLED, TaskState.FAILED, TaskState.SUCCEEDED)
 
 
 class WorkflowConflict(ValueError):
-    """过期审批、任务取消或不允许的状态迁移。"""
+    """Stale approval, task cancellation, or an invalid state transition."""
 
 
 class WorkflowStore:
@@ -50,9 +50,9 @@ class WorkflowStore:
                     UNIQUE(task_id, stage)
                 );
             """)
-            # executescript 会结束入口事务，显式重新加锁以原子执行 DDL 迁移。
+            # executescript ends the initial transaction; reacquire the lock for atomic DDL migration.
             db.execute("BEGIN IMMEDIATE")
-            # 从旧的每阶段唯一作业迁移为每阶段/轮次唯一，保留旧 attempt 与结果。
+            # Migrate stage uniqueness to stage/round uniqueness while preserving old attempts and results.
             columns = {row["name"] for row in db.execute("PRAGMA table_info(workflow_jobs)")}
             if "attempt_no" not in columns:
                 db.execute("ALTER TABLE workflow_jobs RENAME TO workflow_jobs_v1")
@@ -72,6 +72,10 @@ class WorkflowStore:
                 task_id TEXT NOT NULL REFERENCES tasks(task_id), artifact_id TEXT NOT NULL,
                 sha256 TEXT NOT NULL, bytes INTEGER NOT NULL, media_type TEXT NOT NULL,
                 PRIMARY KEY(task_id,artifact_id))""")
+            db.execute("""CREATE TABLE IF NOT EXISTS validation_explanations(
+                task_id TEXT PRIMARY KEY REFERENCES tasks(task_id),
+                status TEXT NOT NULL, facts_json TEXT NOT NULL,
+                result_json TEXT, error_code TEXT)""")
 
     @contextmanager
     def db(self):
@@ -140,7 +144,7 @@ class WorkflowStore:
             db.execute("UPDATE workflow_outbox SET handled=1 WHERE id=?", (event_id,))
 
     def schedule(self, job: JobRequest, sources: dict[str, str], state: TaskState, attempt_no: int = 1):
-        """同轮次节点重放不重复投递；C/D 最多三轮，A 只能一轮。"""
+        """Do not redispatch a replayed node; allow at most three C/D rounds and one A round."""
         if attempt_no not in (1, 2, 3) or (job.stage == "PROFILE_A" and attempt_no != 1):
             raise WorkflowConflict("作业尝试超出预算")
         with self.db() as db:
@@ -165,7 +169,7 @@ class WorkflowStore:
 
     def claim_job(self):
         with self.db() as db:
-            # 取消任务的排队作业不再执行。
+            # Do not execute queued jobs for cancelled tasks.
             db.execute("""UPDATE workflow_jobs SET state='cancelled'
                           WHERE state='queued' AND task_id IN
                           (SELECT task_id FROM tasks WHERE state IN ('CANCELLED','FAILED'))""")
@@ -197,7 +201,7 @@ class WorkflowStore:
                        (json.dumps(profile), json.dumps(issues), task_id))
 
     def approve(self, task_id: str, owner: str, version: int, decisions: tuple[Decision, ...]):
-        """审批与恢复 outbox 同事务；重复相同提交幂等，不重新冻结或执行 C。"""
+        """Commit approval and resume outbox together; identical submissions are idempotent and do not rerun C."""
         with self.db() as db:
             task = db.execute("SELECT * FROM tasks WHERE task_id=? AND owner_id=?",
                               (task_id, owner)).fetchone()
@@ -235,7 +239,7 @@ class WorkflowStore:
         with self.db() as db:
             row = db.execute("SELECT code_json FROM workflow_codes WHERE task_id=? AND attempt_no=?",
                              (task_id, attempt_no)).fetchone()
-            # 旧 checkpoint/任务的首版代码继续使用，不重新调用模型。
+            # Reuse initial source from old checkpoints and tasks without another model call.
             if row is None and attempt_no == 1:
                 row = db.execute("SELECT code_json FROM workflows WHERE task_id=?", (task_id,)).fetchone()
         return json.loads(row["code_json"]) if row and row["code_json"] else None
@@ -254,6 +258,108 @@ class WorkflowStore:
             db.execute("UPDATE workflows SET validation_json=? WHERE task_id=?",
                        (json.dumps(report), task_id))
 
+    def request_validation_explanation(self, task_id: str, owner: str):
+        from backend.llm.validation_explanation import validation_facts
+        with self.db() as db:
+            task = db.execute("SELECT * FROM tasks WHERE task_id=? AND owner_id=?",
+                              (task_id, owner)).fetchone()
+            if task is None:
+                raise WorkflowConflict("任务不存在")
+            existing = db.execute("SELECT status FROM validation_explanations WHERE task_id=?",
+                                  (task_id,)).fetchone()
+            if existing:
+                return existing["status"]
+            if task["state"] not in (TaskState.SUCCEEDED, TaskState.FAILED):
+                raise WorkflowConflict("任务尚未结束")
+            flow = db.execute("SELECT validation_json FROM workflows WHERE task_id=?", (task_id,)).fetchone()
+            job = db.execute("""SELECT * FROM workflow_jobs WHERE task_id=? AND stage='VERIFY_D'
+                              ORDER BY attempt_no DESC LIMIT 1""", (task_id,)).fetchone()
+            if not flow or not job:
+                raise WorkflowConflict("没有可解释的 D 验证报告")
+            if flow["validation_json"] and job["state"] == "finished":
+                report = json.loads(flow["validation_json"])
+            elif job["state"] == "failed" and job["error_code"] == "VALIDATION_REJECTED":
+                evidence = json.loads(job["evidence_json"] or "{}")
+                report = evidence.get("validation")
+            else:
+                raise WorkflowConflict("没有可解释的 D 验证报告")
+            request = json.loads(job["request_json"])
+            if (not isinstance(report, dict) or request.get("task_id") != task_id
+                    or request.get("input_sha256") != task["input_sha256"]
+                    or report.get("spec_sha256") != request.get("spec_sha256")
+                    or report.get("output_sha256") != request.get("candidate_sha256")
+                    or report.get("verdict") != ("passed" if job["state"] == "finished" else "rejected")):
+                raise WorkflowConflict("D 验证报告绑定无效")
+            try:
+                facts = validation_facts(report)
+            except ValueError as exc:
+                raise WorkflowConflict("D 验证报告无效") from exc
+            input_match = report.get("input_sha256") == request["input_sha256"]
+            if facts["checks"][0]["passed"] != input_match:
+                raise WorkflowConflict("D 验证报告绑定无效")
+            db.execute("INSERT INTO validation_explanations(task_id,status,facts_json) VALUES(?,?,?)",
+                       (task_id, "pending", json.dumps(facts, ensure_ascii=True)))
+            self.wake(db, task_id, f"explain:{task_id}")
+            return "pending"
+
+    def validation_explanation(self, task_id: str):
+        from backend.domain.spec import Action, FrozenSpec
+        from backend.llm.validation_explanation import clarify_byte_check
+        with self.db() as db:
+            row = db.execute("""SELECT status,result_json,error_code,facts_json FROM validation_explanations
+                              WHERE task_id=?""", (task_id,)).fetchone()
+            task = db.execute("SELECT owner_id,input_sha256 FROM tasks WHERE task_id=?", (task_id,)).fetchone()
+            flow = db.execute("SELECT spec_json FROM workflows WHERE task_id=?", (task_id,)).fetchone()
+            job = db.execute("""SELECT request_json FROM workflow_jobs WHERE task_id=? AND stage='VERIFY_D'
+                              ORDER BY attempt_no DESC LIMIT 1""", (task_id,)).fetchone()
+        if row is None:
+            return {"status": "not_requested"}
+        result = json.loads(row["result_json"]) if row["result_json"] else None
+        if row["status"] == "completed" and isinstance(result, dict):
+            all_preserved = None
+            try:
+                spec = FrozenSpec.model_validate_json(flow["spec_json"])
+                request = json.loads(job["request_json"])
+                facts = json.loads(row["facts_json"])
+                if (str(spec.task_id) == task_id and spec.owner_id == task["owner_id"]
+                        and spec.input_sha256 == task["input_sha256"]
+                        and request.get("task_id") == task_id
+                        and request.get("input_sha256") == spec.input_sha256
+                        and request.get("spec_sha256") == spec.spec_sha256):
+                    all_preserved = all(d.action == Action.PRESERVE for d in spec.decisions)
+                    byte_passed = next(c["passed"] for c in facts["checks"]
+                                       if c["id"] == "zero_change_bytes")
+                    if not all_preserved and byte_passed is not True:
+                        all_preserved = None
+            except (AttributeError, TypeError, ValueError, KeyError, StopIteration):
+                pass
+            result["text"] = clarify_byte_check(result.get("text"), all_preserved)
+        return {"status": row["status"], "result": result, "error_code": row["error_code"]}
+
+    def claim_validation_explanation(self, task_id: str):
+        with self.db() as db:
+            row = db.execute("SELECT * FROM validation_explanations WHERE task_id=?", (task_id,)).fetchone()
+            if row is None or row["status"] in ("completed", "failed"):
+                return None
+            if row["status"] == "started":
+                db.execute("""UPDATE validation_explanations SET status='failed',
+                           error_code='EXPLANATION_CALL_UNCERTAIN' WHERE task_id=?""", (task_id,))
+                return None
+            if row["status"] != "pending":
+                raise WorkflowConflict("解释请求状态无效")
+            db.execute("UPDATE validation_explanations SET status='started' WHERE task_id=?", (task_id,))
+            return json.loads(row["facts_json"])
+
+    def finish_validation_explanation(self, task_id: str, result=None, error_code=None):
+        with self.db() as db:
+            updated = db.execute("""UPDATE validation_explanations SET status=?,result_json=?,error_code=?
+                                 WHERE task_id=? AND status='started'""",
+                                 ("failed" if error_code else "completed",
+                                  json.dumps(result, ensure_ascii=True) if result is not None else None,
+                                  error_code, task_id))
+            if updated.rowcount != 1:
+                raise WorkflowConflict("解释请求状态过期")
+
     def fail(self, task_id: str, code: str):
         with self.db() as db:
             task = db.execute("SELECT state FROM tasks WHERE task_id=?", (task_id,)).fetchone()
@@ -265,7 +371,7 @@ class WorkflowStore:
 
 @contextmanager
 def process_lock(root: Path, name: str):
-    """本地 OS 文件锁：进程崩溃自动释放；不以到期租约并发运行同一个图。"""
+    """Local OS file lock released on process crash; do not run the same graph concurrently using an expiring lease."""
     root.mkdir(parents=True, exist_ok=True)
     with (root / f"{name}.lock").open("a+b") as stream:
         stream.seek(0, 2)

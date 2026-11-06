@@ -1,6 +1,6 @@
 /**
- * 项目骨架的基础样式。
- * 采用简洁的现代 Web 风格，侧重于可读性和任务状态的展示。
+ * Basic styles for the project scaffold.
+ * A readable layout emphasizes task status.
  */
 
 :root {
@@ -23,7 +23,7 @@ header {
   margin-bottom: 2.2rem;
 }
 
-/* 副标题样式 */
+/* Eyebrow heading. */
 .eyebrow {
   color: #276d83;
   letter-spacing: 0.12em;
@@ -46,7 +46,7 @@ p {
   line-height: 1.65;
 }
 
-/* 卡片式容器 */
+/* Card containers. */
 section {
   background: white;
   border: 1px solid #d9e3ea;
@@ -71,7 +71,7 @@ select {
   font: inherit;
 }
 
-/* 按钮样式 */
+/* Buttons. */
 button {
   margin-top: 1rem;
   border: 0;
@@ -86,17 +86,43 @@ button:hover {
   background: #0b4e5c;
 }
 
-/* 提示文本 */
+/* Helper text. */
 .note {
-  font-size: 0.85rem;
-  color: #587083;
+  font-size: 0.95rem;
+  color: #40596c;
 }
 
-/* JSON 元数据展示区域 */
+details {
+  margin: 1rem 0;
+}
+
+summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+#explanation-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.8;
+  font-size: 1rem;
+}
+
+/* JSON metadata. */
 pre {
   overflow: auto;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+#progress-list li {
+  margin: 0.6rem 0;
+}
+
+#progress-list p {
+  margin: 0.15rem 0;
+  color: #587083;
+  font-size: 0.9rem;
 }
 
 input[type="checkbox"] {

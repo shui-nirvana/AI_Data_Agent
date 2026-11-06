@@ -8,3 +8,31 @@ __pycache__/
 .env.*
 !.env.example
 node_modules/
+
+# Local Chinese documentation and reports; Git cannot detect document language.
+/doc-zh/
+/AI_Data_Agent_详细设计与实施路线图_v1.md
+/AI_Data_Agent_详细设计与实施路线图_v2.md
+/AI_Data_Agent_项目设计与架构规范_v4.md
+/交互式自愈系统项目设计与架构规范说明书.docx
+/本地联调报告_2026-11-03.md
+/本地闭环验收报告_2026-11-03.md
+/设计审查与模块细化_v1.md
+/项目代码与业务流追踪指南.md
+/本地闭环手动验证手册.md
+/合成大样本数据说明.md
+/deploy/README.md
+/deploy/deepseek.md
+/deploy/graph_runner.md
+/deploy/implementation_status.md
+/deploy/local_operations.md
+/deploy/vultr_inference.md
+/docs/submission.md
+
+# Local experiment data, generated artifacts, screenshots, and model evidence.
+/DeepSeek_*.txt
+/DeepSeek_*.json
+/synthetic_large_*.csv
+/local_acceptance_*.csv
+/local_acceptance_*.json
+/.screenshots/

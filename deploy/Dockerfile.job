@@ -1,15 +1,15 @@
-# 构建脚本将已拉取并记录的 Python 镜像摘要传入；不能用漂移标签部署。
+# The build script supplies the pulled and recorded Python image digest; do not deploy a mutable tag.
 ARG PYTHON_BASE
 FROM ${PYTHON_BASE}
 WORKDIR /app
 ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
-# 依赖仅在构建时安装，作业运行期间无网络/无依赖安装。
+# Dependencies are installed at build time only; jobs have no network or dependency installation.
 COPY deploy/requirements-job.lock /app/requirements-job.lock
 RUN pip install --no-cache-dir --require-hashes -r /app/requirements-job.lock
 COPY backend/domain /app/backend/domain
 COPY backend/__init__.py /app/backend/__init__.py
 COPY images /app/images
 USER 10001:10001
-# 保持 PID 1 存活，exec 作业完成后仍可读取受限 tmpfs 输出。
-# 执行结束/超时/取消均由 worker 强制回收此容器，不复用。
+# Keep PID 1 alive so restricted tmpfs output remains readable after the exec job.
+# The worker forcibly removes this container after completion, timeout, or cancellation; it is not reused.
 CMD ["python", "-c", "import time; time.sleep(86400)"]

@@ -1,6 +1,6 @@
-"""
-审批契约。冻结的规范不能由模型自由生成的输出直接创建。
-该模块定义了用户可以采取的清洗动作、决策记录以及最终冻结的清洗规范结构。
+"""Approval contract: a frozen specification cannot be created directly from unconstrained model output.
+
+
 """
 
 from enum import StrEnum
@@ -15,10 +15,10 @@ from backend.domain.csv_policy import DATE_FORMATS, PARSER_VERSION
 
 
 class Action(StrEnum):
-    """支持的原子清洗动作枚举"""
-    PRESERVE = "preserve"                       # 保留原样（不做修改）
-    NORMALIZE_DATE = "normalize_date"           # 日期格式标准化
-    FILL_NULL_WITH_LITERAL = "fill_null_with_literal" # 使用字面量填充空值
+    """Supported atomic cleaning actions."""
+    PRESERVE = "preserve"                       # Preserve unchanged.
+    NORMALIZE_DATE = "normalize_date"           # Normalize date format.
+    FILL_NULL_WITH_LITERAL = "fill_null_with_literal" # Fill empty values with a literal.
 
 
 class ImmutableModel(BaseModel):
@@ -26,7 +26,7 @@ class ImmutableModel(BaseModel):
 
 
 class ActionParams(ImmutableModel):
-    """参数不用可变字典，防止 frozen 记录被通过嵌套对象偷偷修改。"""
+    """Avoid mutable parameter dictionaries so nested objects cannot alter a frozen record."""
 
     input_formats: tuple[str, ...] = ()
     output_format: Literal["YYYY-MM-DD"] = "YYYY-MM-DD"
@@ -35,7 +35,7 @@ class ActionParams(ImmutableModel):
 
 
 class Decision(ImmutableModel):
-    """已获准的单列动作；身份与版本由 API 的审批事务核实。"""
+    """An approved single-column action; the API approval transaction verifies identity and version."""
 
     issue_id: str = Field(min_length=1, max_length=100)
     action: Action
@@ -70,7 +70,7 @@ class Decision(ImmutableModel):
 
 
 class FrozenSpec(ImmutableModel):
-    """规范哈希不等同于签名；D 的规范须来自可信控制层只读挂载。"""
+    """A specification hash is not a signature; D must receive the specification from a trusted read-only control-plane mount."""
 
     schema_version: Literal["1.0"] = "1.0"
     parser_version: Literal["csv-utf8-v1"] = PARSER_VERSION
@@ -107,7 +107,7 @@ class FrozenSpec(ImmutableModel):
 
 
 def specification_hash(payload: dict) -> str:
-    """稳定序列化后计算哈希，不依赖 JSON 空白与字典插入顺序。"""
+    """Hash stable serialization independent of JSON whitespace and dictionary insertion order."""
     content = {key: value for key, value in payload.items() if key != "spec_sha256"}
     encoded = json.dumps(content, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
@@ -118,10 +118,10 @@ def freeze_spec(
     columns: tuple[str, ...], decisions: tuple[Decision, ...],
     issues: tuple[dict, ...],
 ) -> FrozenSpec:
-    """纯规范构造器，不读取 CSV、不保存审批，也不替代 API 鉴权/outbox 事务。
+    """Build a specification without reading CSV or persisting approval. Callers must use verified A findings; the API must still perform authorization and its approval/outbox transaction.
 
-    issues 必须由调用方从本任务已验证的 A 输出读取，不能取自用户请求。
-    API 通过 WorkflowStore 审批事务保存规范与恢复事件，不能跳过本校验。
+
+
     """
     by_id = {issue["issue_id"]: issue for issue in issues}
     if len(by_id) != len(issues) or {d.issue_id for d in decisions} != set(by_id):

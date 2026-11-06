@@ -1,6 +1,6 @@
-"""仅供 A/D 容器使用的有界 CSV 字面值读取，不允许 API 导入调用。
+"""Bounded literal CSV reading for A/D containers only. Byte, row, column, and cell limits do not replace container memory limits.
 
-字节/行列/总单元格约束不是容器内存限制的替代品；读取表格会占用内存。
+
 """
 
 import csv
@@ -20,7 +20,7 @@ class CsvTable:
 
 
 def read_csv(source: Path, policy: CsvPolicy = CSV_POLICY) -> CsvTable:
-    """UTF-8（可含 BOM）、逗号分隔、标准引号；不推断类型、不跳过坏行。"""
+    """Read UTF-8 with an optional BOM, comma delimiter, and standard quoting; never infer types or skip malformed rows."""
     with source.open("rb") as stream:
         content = stream.read(policy.max_bytes + 1)
     if len(content) > policy.max_bytes:

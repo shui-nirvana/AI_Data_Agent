@@ -1,6 +1,6 @@
-"""
-D 的容器内入口。控制层调度仍关闭，不得在 API 进程调用。
-仅读取固定只读路径中的原件/规范/候选，并产生有界验证报告。
+"""D container entrypoint. Read originals, specifications, and candidates only from fixed read-only paths and produce a bounded report; do not invoke it in the API process.
+
+
 """
 
 import csv
@@ -12,7 +12,7 @@ from images.validator.verify import verify
 
 
 def main() -> None:
-    """验证程序主入口"""
+    """Validation program entrypoint."""
     output = Path("/output")
     output.mkdir(parents=True, exist_ok=True)
     try:
@@ -23,7 +23,7 @@ def main() -> None:
         spec = FrozenSpec.model_validate_json(content)
         report = verify(Path("/input/data.csv"), Path("/input/candidate.csv"), spec)
     except (ValueError, csv.Error, OSError) as exc:
-        # 不把异常的原始消息写入报告，它可能包含用户数据或宿主路径。
+        # Do not report raw exception messages; they may contain user data or host paths.
         report = {"verdict": "rejected", "error_code": "INVALID_INPUT_OR_SPEC",
                   "error_type": type(exc).__name__}
     (output / "validation.json").write_text(

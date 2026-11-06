@@ -1,4 +1,4 @@
-"""真实 Docker 执行生成器产物。默认跳过；live 另需显式授权和配置密钥。"""
+"""Execute generator output in real Docker. Skipped by default; live calls additionally require explicit authorization and credentials."""
 
 import json
 import hashlib
@@ -26,12 +26,14 @@ pytestmark = pytest.mark.skipif(os.environ.get("AI_AGENT_RUN_DOCKER_TESTS") != "
                                 reason="Requires explicit real Docker opt-in")
 
 
-@pytest.mark.parametrize("mode", ["repair", "missing", "security", "d_reject", "live_date", "live_fill", "live_repair"])
+@pytest.mark.parametrize("mode", ["repair", "missing", "security", "d_reject", "live_date", "live_fill",
+                                  "live_repair", "vultr_live_date", "vultr_live_fill"])
 def test_generator_and_new_containers(tmp_path, mode):
-    live = mode.startswith("live")
+    vultr = mode.startswith("vultr_live_")
+    live = mode.startswith("live") or vultr
     if live and (os.environ.get("AI_AGENT_RUN_LIVE_LLM_TESTS") != "1"
                  or os.environ.get("AI_AGENT_LLM_ALLOW_EXTERNAL") != "true"):
-        pytest.skip("Live DeepSeek test requires explicit external/cost opt-in")
+        pytest.skip("Live model test requires explicit external/cost opt-in")
     manifest = Path(os.environ.get("AI_AGENT_DOCKER_IMAGES", ".runtime/docker/images.json")).resolve()
     api = TestClient(create_app(data_dir=tmp_path, demo_token="test-secret"))
     headers = {"X-Demo-Token": "test-secret", "Content-Type": "text/csv", "X-Task-Goal": "Test"}
@@ -45,6 +47,12 @@ def test_generator_and_new_containers(tmp_path, mode):
             context = json.loads(request.messages[-1].content)
             spec_hash = context["task"]["spec_sha256"]
             source = TEST_CODE
+            if responses and mode == "repair":
+                assert context["runtime_diagnostic"] == {
+                    "exception_type": "RuntimeError", "line": 1, "function": "<module>"
+                }
+            if responses and mode == "missing":
+                assert "runtime_diagnostic" not in context
             if not responses:
                 if mode == "repair":
                     source = "raise RuntimeError('PRIVATE_ROW must not be sent to model')\n"
@@ -60,7 +68,11 @@ def test_generator_and_new_containers(tmp_path, mode):
                                  model="test", finish_reason="completed",
                                  text=json.dumps({"schema_version": "1.0", "spec_sha256": spec_hash, "source": source}))
 
-    client = DeepSeekClient.from_environment(os.environ.get("AI_AGENT_LLM_MODEL")) if live else MockModel()
+    if vultr:
+        from backend.llm.vultr import VultrInferenceClient
+        client = VultrInferenceClient.from_environment(os.environ.get("AI_AGENT_LLM_MODEL"))
+    else:
+        client = DeepSeekClient.from_environment(os.environ.get("AI_AGENT_LLM_MODEL")) if live else MockModel()
     generator = LLMCodeGenerator(tmp_path, ModelGateway(client))
     if mode == "live_repair":
         original_generator = generator
@@ -85,8 +97,9 @@ def test_generator_and_new_containers(tmp_path, mode):
         assert GraphRunner(tmp_path, generator).run_once()
 
     def worker():
-        # worker 子进程明确不继承模型密钥，Docker Env 更仅含固定作业标志。
-        environment = {k: v for k, v in os.environ.items() if k != "DEEPSEEK_API_KEY"}
+        # The worker subprocess does not inherit model keys; Docker Env contains only the fixed job flag.
+        environment = {k: v for k, v in os.environ.items()
+                       if k not in ("DEEPSEEK_API_KEY", "VULTR_SERVERLESS_INFERENCE_API_KEY", "VULTR_API_KEY")}
         process = subprocess.run([
             sys.executable, "-m", "workers.sandbox_manager.queue_worker", "--once",
             "--data-dir", str(tmp_path), "--images", str(manifest),
@@ -101,7 +114,7 @@ def test_generator_and_new_containers(tmp_path, mode):
     decisions = []
     for issue in review["issues"]:
         if issue["column"] == "date":
-            fill = mode == "live_fill"
+            fill = mode in ("live_fill", "vultr_live_fill")
             decisions.append({
                 "issue_id": issue["issue_id"], "column": "date",
                 "action": "fill_null_with_literal" if fill else "normalize_date",
@@ -116,7 +129,7 @@ def test_generator_and_new_containers(tmp_path, mode):
                     headers=headers).status_code == 200
     runner()
     store = WorkflowStore(tmp_path)
-    # C 可能触发最多两次合法修复；每次有候选才启动 D。
+    # C may trigger at most two eligible repairs; start D only for an existing candidate.
     for _ in range(4):
         if store.task(task_id)["state"] in ("FAILED", "SUCCEEDED", "CANCELLED"):
             break
@@ -138,9 +151,15 @@ def test_generator_and_new_containers(tmp_path, mode):
     assert len({job["job_id"] for job in jobs}) == len(jobs)
     if not live:
         assert len(responses) == (2 if mode in ("repair", "missing") else 1)
+        if mode == "repair":
+            evidence = api.get(f"/api/tasks/{task_id}/evidence", headers=headers).json()
+            assert evidence["attempts"][1]["runtime_diagnostic"] == {
+                "exception_type": "RuntimeError", "line": 1, "function": "<module>"
+            }
     else:
         code = json.loads(store.flow(task_id)["code_json"])
-        assert code["provider"] == "deepseek" and code["generation_kind"] in ("llm_generate", "llm_repair")
+        assert code["provider"] == ("vultr" if vultr else "deepseek")
+        assert code["generation_kind"] in ("llm_generate", "llm_repair")
         assert json.loads(store.flow(task_id)["validation_json"])["changed_cells"] == 1
     download = api.get(f"/api/tasks/{task_id}/artifacts/output", headers=headers)
     assert download.status_code == (409 if mode in ("security", "d_reject") else 200)

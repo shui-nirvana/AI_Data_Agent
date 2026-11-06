@@ -13,6 +13,8 @@ let refreshing = false;
 let eventTask = null;
 let eventCursor = 0;
 let eventLines = [];
+let eventItems = [];
+let explanationPending = false;
 
 async function request(path, options = {}) {
   const response = await fetch(path, {
@@ -108,6 +110,21 @@ function renderReview(review) {
   }
 }
 
+function renderExplanation(explanation) {
+  explanationPending = ["pending", "started"].includes(explanation.status);
+  $("explain").hidden = ["completed", "failed"].includes(explanation.status);
+  $("explain").disabled = explanationPending;
+  $("explanation-text").textContent = explanation.result?.text || "";
+  const messages = {
+    not_requested: "尚未请求解释。",
+    pending: "解释已排队，等待 Graph Runner。",
+    started: "模型正在组织验证说明。",
+    completed: "解释已生成；D 报告仍是权威结论。",
+    failed: "解释不可用，不影响 D 结论或下载；本任务不会自动重复调用。",
+  };
+  $("explanation-status").textContent = messages[explanation.status] || "解释状态未知。";
+}
+
 async function refreshTask() {
   if (!taskId || !$("token").value || refreshing) return;
   refreshing = true;
@@ -136,18 +153,39 @@ async function refreshTask() {
       eventTask = taskId;
       eventCursor = 0;
       eventLines = [];
+      eventItems = [];
     }
     const events = await (
       await request(taskPath(`/events?after=${eventCursor}`))
     ).json();
+    eventItems.push(...events.events);
     eventLines.push(
       ...events.events.map((e) => `${e.sequence}  ${e.created_at}  ${e.kind}`),
     );
     if (events.events.length) eventCursor = events.events.at(-1).sequence;
     $("events").textContent = eventLines.join("\n");
     const evidence = await (await request(taskPath("/evidence"))).json();
+    if (current !== taskId) return;
     $("evidence").textContent = JSON.stringify(evidence, null, 2);
     $("evidence-section").hidden = false;
+    $("progress-list").replaceChildren();
+    for (const stage of window.summarizeProgress(task, eventItems, evidence)) {
+      const entry = document.createElement("li");
+      const title = document.createElement("strong");
+      title.textContent = `${stage.label}：${stage.status}`;
+      const detail = document.createElement("p");
+      detail.textContent = stage.detail;
+      entry.append(title, detail);
+      $("progress-list").append(entry);
+    }
+    const canExplain = ["SUCCEEDED", "FAILED"].includes(task.state) && !!evidence.validation;
+    $("explanation-section").hidden = !canExplain;
+    explanationPending = false;
+    if (canExplain) {
+      const explanation = await (await request(taskPath("/validation-explanation"))).json();
+      if (current !== taskId) return;
+      renderExplanation(explanation);
+    }
     $("downloads").replaceChildren();
     for (const artifact of evidence.artifacts) {
       const button = document.createElement("button");
@@ -202,6 +240,20 @@ $("upload-form").addEventListener("submit", (event) => {
   });
 });
 $("refresh").addEventListener("click", () => run(refreshTask));
+$("explain").addEventListener("click", () =>
+  run(async () => {
+    const current = taskId;
+    $("explain").disabled = true;
+    try {
+      const explanation = await (
+        await request(taskPath("/validation-explanation"), { method: "POST" })
+      ).json();
+      if (current === taskId) renderExplanation(explanation);
+    } finally {
+      if (current === taskId && !explanationPending) $("explain").disabled = false;
+    }
+  }),
+);
 $("restore").addEventListener("click", () =>
   run(async () => {
     taskId = $("restore-id").value.trim();
@@ -262,5 +314,5 @@ $("review-form").addEventListener("submit", (event) => {
 });
 if (taskId) $("restore-id").value = taskId;
 setInterval(() => {
-  if (!document.hidden && taskId && !$("cancel").hidden) run(refreshTask);
+  if (!document.hidden && taskId && (!$("cancel").hidden || explanationPending)) run(refreshTask);
 }, 2000);

@@ -1,7 +1,7 @@
-"""显式启用的真实 Docker/Graph 集成测试，全部使用人工无敏感金样本。
+"""Opt-in real Docker/Graph integration using non-sensitive, hand-written golden cases. The worker is a separate process; the cleaning branch uses test source, not a real model.
 
-AI_AGENT_RUN_DOCKER_TESTS=1 时运行；worker 始终是独立子进程。
-清洗分支注入测试源码生成器，不调用真实模型，不冒充比赛 LLM 证据。
+
+
 """
 
 import hashlib

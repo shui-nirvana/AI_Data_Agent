@@ -1,4 +1,4 @@
-"""DeepSeek HTTP 适配器；密钥来自环境或本地文件，不进入业务记录或容器。"""
+"""DeepSeek HTTP adapter; credentials come from the environment or a local file and never enter task records or containers."""
 
 import asyncio
 import json
@@ -14,7 +14,7 @@ KEY_FILE = Path(__file__).resolve().parents[2] / ".env.deepseek"
 
 
 def load_key_file(path: Path) -> str:
-    """只读取固定格式的密钥，不执行文件内容，也不向环境写入密钥。"""
+    """Read a key in the fixed format without executing the file or writing the key to the environment."""
     try:
         if path.is_symlink() or not path.is_file():
             raise ModelUnavailableError("DeepSeek 密钥文件不存在或不是普通文件")
@@ -52,7 +52,7 @@ class DeepSeekClient:
 
     @classmethod
     def from_environment(cls, model: str | None = None, *, key_file: Path | None = None):
-        # 明确设置的环境变量优先（包括空值，空值会报错而非偷偷切换密钥）。
+        # An explicitly set environment variable takes precedence, including an empty value that must fail.
         if "DEEPSEEK_API_KEY" in os.environ:
             key = os.environ["DEEPSEEK_API_KEY"]
         else:
@@ -70,7 +70,7 @@ class DeepSeekClient:
             "stream": False,
         }
         try:
-            # 不跟随重定向、不读代理环境、无隐式重试，避免秘密外送和重复费用。
+            # Do not follow redirects, trust proxy environment settings, or retry implicitly.
             async with asyncio.timeout(request.timeout_seconds):
                 async with httpx.AsyncClient(
                     timeout=request.timeout_seconds, follow_redirects=False,
@@ -104,7 +104,7 @@ class DeepSeekClient:
             if reason == "completed" and (not isinstance(text, str) or not text.strip()):
                 raise ValueError()
             usage = data.get("usage") or {}
-            # 不读取或保存 reasoning_content、原始供应商报错、请求头。
+            # Do not read or store reasoning_content, raw provider errors, or request headers.
             return ModelResponse(
                 request_id=request.request_id, provider="deepseek", model=data["model"],
                 text=text if isinstance(text, str) and text else "[no complete output]",

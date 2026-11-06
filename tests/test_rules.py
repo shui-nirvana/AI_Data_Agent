@@ -1,4 +1,4 @@
-"""D0/D1 金样本与负例。只测试确定性规则，不代表真实容器隔离已验证。"""
+"""D0/D1 golden and negative cases for deterministic rules; these do not validate real container isolation."""
 
 import csv
 from uuid import uuid4
@@ -21,7 +21,7 @@ def write_csv(path, rows):
 
 @pytest.fixture
 def golden(tmp_path):
-    """期望结果人工列出，不能调用验证器生成，否则测试形成循环自证。"""
+    """Expected results are specified manually; generating them with the verifier would make the test circular."""
     original = tmp_path / "original.csv"
     candidate = tmp_path / "candidate.csv"
     rows = [
@@ -222,7 +222,7 @@ def test_zero_change_requires_identical_bytes(golden):
     spec = freeze_spec(**{**arguments, "decisions": decisions})
     candidate.write_bytes(original.read_bytes())
     assert verify(original, candidate, spec)["verdict"] == "passed"
-    # 相同单元格但换行/序列化变更：无修改任务不能伪装成字节一致。
+    # Equal cells with different line endings or serialization must not pass byte equality for preserve-only tasks.
     with candidate.open("w", encoding="utf-8", newline="") as stream:
         csv.writer(stream, lineterminator="\n").writerows(rows)
     assert verify(original, candidate, spec)["verdict"] == "rejected"

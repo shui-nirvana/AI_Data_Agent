@@ -1,4 +1,4 @@
-"""镜像内可信产物收集器。Docker archive API 在部分引擎不能读取 tmpfs。"""
+"""Trusted in-image artifact collector; some Docker archive APIs cannot read tmpfs."""
 
 import io
 import os
@@ -17,10 +17,10 @@ LIMITS = {"PROFILE_A": 1_000_000, "CLEAN_C": 12_000_000, "VERIFY_D": 1_000_000}
 
 
 def stop_children():
-    """容器 PID 命名空间内只有可信 PID 1 和本收集器可继续运行。
+    """Only trusted PID 1 and this collector may continue in the container PID namespace. Stop leftover forked processes through repeated PID-ordered enumeration; unprivileged same-UID processes cannot catch SIGSTOP.
 
-    无提权能力的作业与收集器同 UID；SIGSTOP 不可被捕获。
-    按 PID 顺序多轮枚举，停止可能遗留的 fork 后台子进程。
+
+
     """
     stopped = set()
     for _ in range(8):
@@ -58,7 +58,7 @@ def main():
         try:
             files[name] = read_regular(Path("/output") / name, LIMITS[stage])
         except FileNotFoundError:
-            pass  # 缺输出仍收集有界诊断，由 worker 明确判失败，绝非成功。
+            pass  # Collect bounded diagnostics even when output is missing; the worker must fail the attempt.
     if sum(map(len, files.values())) > LIMITS[stage]:
         raise ValueError("aggregate output quota exceeded")
     for name in ("stdout.log", "stderr.log"):
@@ -68,7 +68,7 @@ def main():
                 if stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
                     files[name] = stream.read(65536)
         except OSError:
-            pass  # 日志可缺失，固定产物和收集退出码不可缺失。
+            pass  # Logs may be absent; fixed artifacts and the collector exit code may not.
     if stage == "CLEAN_C":
         try:
             files["runtime.json"] = read_regular(Path("/tmp/runtime.json"), 4096)

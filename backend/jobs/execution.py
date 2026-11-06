@@ -1,4 +1,4 @@
-"""应用到受信调度服务的端口，不包含云 SDK、宿主路径或容器命令。"""
+"""Application port for trusted scheduling, without cloud SDKs, host paths, or container commands."""
 
 from dataclasses import dataclass
 from typing import Literal, Protocol
@@ -9,11 +9,21 @@ from backend.jobs.policy import SandboxLimits
 
 @dataclass(frozen=True)
 class ExecutionReceipt:
-    """调度回执不是成功证据；handle 只是适配器管理的不透明引用。"""
+    """A receipt is not proof of success; the handle is an opaque adapter-managed reference."""
 
     task_id: str
     attempt_id: str
     handle: str
+
+
+@dataclass(frozen=True)
+class ExecutedSource:
+    """Reference and digest of the failed attempt's executed source snapshot, not necessarily the original model output."""
+
+    source_ref: str
+    sha256: str
+    spec_ref: str
+    profile_ref: str
 
 
 @dataclass(frozen=True)
@@ -27,10 +37,10 @@ class ExecutionStatus:
 
 
 class ExecutionBackend(Protocol):
-    """本机受信调度/RPC/远程 worker 都实现此端口，应用不直接握有 socket。
+    """Trusted local schedulers, RPC, and remote workers implement this port. Implementations must enforce idempotence, fixed images and entrypoints, isolation, ownership, and cleanup; the protocol alone does not prove security.
 
-    实现必须幂等投递、固定镜像与入口、落实全部隔离限额、验证归属并回收。
-    Protocol 只约定 API，不证明安全能力；每个平台仍需独立隔离验收。
+
+
     """
 
     def submit(self, job: JobRequest, limits: SandboxLimits) -> ExecutionReceipt: ...
@@ -39,7 +49,7 @@ class ExecutionBackend(Protocol):
 
 
 class DisabledExecutionBackend:
-    """缺适配器时明确失败，不回退到控制层 subprocess 或本机 CSV 解析。"""
+    """Fail explicitly without an adapter; never fall back to control-plane subprocesses or local CSV parsing."""
 
     def submit(self, job: JobRequest, limits: SandboxLimits) -> ExecutionReceipt:
         raise NotImplementedError("尚未接入并验收容器运行时适配器")

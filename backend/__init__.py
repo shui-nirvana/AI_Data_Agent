@@ -1,3 +1,3 @@
-"""
-控制平面代码；绝不要在此处执行生成的 Python 代码。
+"""Trusted control-plane code; never execute generated Python here.
+
 """

@@ -1,7 +1,7 @@
-"""真实 Docker 开发隔离检查；全部使用人工测试源码，不调用模型。
+"""Real Docker development isolation checks using hand-written test source, not a model. These are not security certification or kernel escape tests. The optional stress mode consumes the C memory limit and waits for a wall timeout.
 
-应先通过正常 A/C/D 烟测。检查不等于完整安全认证，不测试内核逃逸。
---stress 会主动占用 C 的内存限额并等待一次墙钟超时，只在专用开发机运行。
+
+
 """
 
 import argparse
@@ -81,7 +81,7 @@ def run_checks(manifest: Path, output: Path, stress: bool = False) -> Path:
     directory.mkdir(parents=True)
     source = directory / "data.csv"
     source.write_bytes(b"id,value\n1,a\n")
-    # 此文件不挂载进任何容器；源码只检查它未出现在 /input。
+    # This file is not mounted into a container; the test source only checks that it is absent from /input.
     (directory / "host-only.txt").write_text("non-sensitive test marker", encoding="utf-8")
     digest = hashlib.sha256(source.read_bytes()).hexdigest()
     task_id = str(uuid4())
@@ -106,8 +106,8 @@ def run_checks(manifest: Path, output: Path, stress: bool = False) -> Path:
         execution = json.loads(Path(status.result_ref).read_text(encoding="utf-8"))
         attempt = backend.root / job.attempt_id
         if name == "boundaries":
-            # 新入口把吞掉的越权异常也记作违规；必须失败，不再要求生成成功候选。
-            # 检查的是禁用操作被入口/容器阻止，不单独证明底层 seccomp/capabilities。
+            # The entrypoint treats swallowed unauthorized-operation exceptions as violations and must fail.
+            # This checks that the entrypoint/container blocks the operation, not seccomp or capabilities in isolation.
             passed = (status.state == "failed" and execution.get("runtime_category") == "security_violation"
                       and not (attempt / "result").exists())
         elif name == "wall_timeout":
@@ -126,7 +126,7 @@ def run_checks(manifest: Path, output: Path, stress: bool = False) -> Path:
             if name == "log_truncation":
                 log = attempt / "logs/stdout.log"
                 passed = passed and log.exists() and log.stat().st_size == 65536
-        # SDK 查询同标签容器为空，确认这次尝试确实被回收。
+        # Confirm that no container remains for this attempt's label.
         remaining = backend.client.containers.list(
             all=True, filters={"label": f"ai-data-agent.attempt={job.attempt_id}"}
         )

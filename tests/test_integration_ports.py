@@ -1,4 +1,4 @@
-"""仅用内存测试替身验证端口替换，不代表任何云/模型已接入。"""
+"""In-memory port substitution tests, not evidence of cloud or model integration."""
 
 import asyncio
 from uuid import uuid4
@@ -19,7 +19,7 @@ from workers.sandbox_manager.runner import SandboxManager
 
 
 class MemoryExecutor:
-    """无容器、无 subprocess，仅记录门面调用及资源策略。"""
+    """Record facade calls and resource policies without containers or subprocesses."""
 
     def __init__(self, name):
         self.name = name

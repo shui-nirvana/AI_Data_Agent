@@ -1,4 +1,4 @@
-"""Docker SDK 替身测试，不证明真实引擎或云端隔离已经通过验收。"""
+"""Docker SDK double tests, not evidence of real engine or cloud isolation acceptance."""
 
 import hashlib
 import io
@@ -18,9 +18,22 @@ from backend.jobs.contracts import JobRequest, Stage
 from backend.jobs.execution import ExecutionReceipt
 from backend.jobs.policy import LIMITS
 from workers.sandbox_manager.build_images import bundle_sources
-from workers.sandbox_manager.docker_backend import DockerExecutionBackend, archive_file
+from workers.sandbox_manager.docker_backend import DockerExecutionBackend, UnreclaimedSandbox, archive_file
 
 IMAGE = "sha256:" + "a" * 64
+
+
+class FakeWatchdog:
+    def __init__(self, directory, task_id, attempt_id, deadline):
+        self.directory = directory
+        self.running = True
+
+    def alive(self):
+        return self.running
+
+    def complete(self):
+        self.running = False
+        (self.directory / "watchdog.done").touch()
 
 
 def tar_payload(name, data=b"{}", kind=tarfile.REGTYPE):
@@ -134,7 +147,8 @@ class Client:
 @pytest.fixture
 def prepared(tmp_path):
     client = Client()
-    backend = DockerExecutionBackend(tmp_path / "jobs", dict.fromkeys(Stage, IMAGE), client)
+    backend = DockerExecutionBackend(tmp_path / "jobs", dict.fromkeys(Stage, IMAGE),
+                                     client, watchdog_factory=FakeWatchdog)
     source = tmp_path / "source.csv"
     source.write_bytes(b"id,value\n1,a\n")
     job = JobRequest(str(uuid4()), str(uuid4()), Stage.PROFILE_A,
@@ -167,10 +181,12 @@ def test_fixed_isolation_parameters_and_idempotence(prepared):
     assert set(options["tmpfs"]) == {"/tmp", "/output"}
     assert f"size={LIMITS[job.stage].output_bytes}" in options["tmpfs"]["/output"]
     assert options["log_config"]["Type"] == "none"
+    assert options["restart_policy"] == {"Name": "no"}
+    assert options["command"] == ["python", "-c", f"import time; time.sleep({LIMITS[job.stage].timeout_seconds})"]
     assert (backend.root / job.attempt_id / "logs/stdout.log").stat().st_size == 65536
     assert backend.submit(job, LIMITS[job.stage]) == status.receipt
     assert len(client.created) == 1
-    # 输入快照不随受信来源之后的变化而漂移。
+    # Input snapshots do not drift when the trusted source later changes.
     source.write_bytes(b"changed")
     assert (backend.root / job.attempt_id / "input/data.csv").read_bytes() != source.read_bytes()
 
@@ -195,6 +211,12 @@ def test_failures_never_return_success(prepared, monkeypatch, failure):
             return original(path, data)
 
         monkeypatch.setattr(Path, "write_bytes", fail_result)
+    if failure == "cleanup":
+        with pytest.raises(UnreclaimedSandbox):
+            run(prepared)
+        assert client.container.removed
+        assert not (backend.root / job.attempt_id / "watchdog.done").exists()
+        return
     status = run(prepared)
     assert status.state == "failed"
     assert client.container.removed
@@ -202,20 +224,65 @@ def test_failures_never_return_success(prepared, monkeypatch, failure):
     assert manifest["state"] == "failed"
     if failure == "oom":
         assert status.limit_reason == "oom"
-    if failure == "cleanup":
-        assert manifest["error_code"] == "CLEANUP_FAILED"
 
 
 def test_timeout_removes_container(prepared, monkeypatch):
     _, client, _, _ = prepared
     client.progress["Running"] = True
-    ticks = iter([0, 1000, 1001])
+    ticks = iter([0, 0, 0, 1000, 1001])
     monkeypatch.setattr("workers.sandbox_manager.docker_backend.time.monotonic",
-                        lambda: next(ticks))
+                        lambda: next(ticks, 1001))
     status = run(prepared)
     assert status.state == "failed" and status.timed_out
     assert status.limit_reason == "wall_timeout"
     assert client.container.removed and not client.container.paused
+
+
+def test_ambiguous_create_stops_without_declaring_cleanup(prepared):
+    backend, client, job, _ = prepared
+
+    def ambiguous(*args, **kwargs):
+        client.created.append(kwargs)
+        raise TimeoutError("private daemon detail")
+
+    client.containers.create = ambiguous
+    with pytest.raises(UnreclaimedSandbox):
+        run(prepared)
+    directory = backend.root / job.attempt_id
+    assert (directory / "creation.pending").exists()
+    assert not (directory / "watchdog.done").exists()
+    assert not (directory / "execution.json").exists()
+
+
+def test_dead_watchdog_prevents_container_creation(prepared):
+    backend, client, job, _ = prepared
+
+    class DeadWatchdog(FakeWatchdog):
+        def alive(self):
+            return False
+
+    backend.watchdog_factory = DeadWatchdog
+    status = run(prepared)
+    assert status.state == "failed"
+    assert not client.created
+    assert not (backend.root / job.attempt_id / "creation.pending").exists()
+
+
+def test_watchdog_exit_during_execution_fails_closed(prepared):
+    backend, client, job, _ = prepared
+    guards = []
+
+    def factory(*args):
+        guard = FakeWatchdog(*args)
+        guards.append(guard)
+        return guard
+
+    backend.watchdog_factory = factory
+    client.callback = lambda: setattr(guards[0], "running", False)
+    status = run(prepared)
+    manifest = json.loads(Path(status.result_ref).read_text())
+    assert status.state == "failed" and manifest["error_code"] == "WATCHDOG_FAILED"
+    assert client.container.removed
 
 
 def test_running_query_and_cancellation(prepared):
@@ -278,11 +345,12 @@ def test_spec_code_and_candidate_bindings_and_failed_d_report(prepared, tmp_path
     code.write_bytes(b"print('test')\n")
     job = JobRequest(a_job.task_id, str(uuid4()), Stage.CLEAN_C, a_job.input_sha256,
                      spec.spec_sha256, "b" * 64)
-    with pytest.raises(ValueError, match="源码或候选"):
-        backend.prepare(job, {"data.csv": source, "spec.json": spec_path, "clean.py": code})
+    backend.prepare(job, {"data.csv": source, "spec.json": spec_path, "clean.py": code})
+    assert backend._checked_clean_snapshot(job) == code.read_bytes()
+    assert backend._clean_snapshot_hashes[job.attempt_id] != job.code_sha256
     job = JobRequest(a_job.task_id, str(uuid4()), Stage.VERIFY_D, a_job.input_sha256,
                      spec.spec_sha256, candidate_sha256="b" * 64)
-    with pytest.raises(ValueError, match="源码或候选"):
+    with pytest.raises(ValueError, match="候选"):
         backend.prepare(job, {"data.csv": source, "spec.json": spec_path,
                               "candidate.csv": source})
     job = JobRequest(a_job.task_id, str(uuid4()), Stage.VERIFY_D, a_job.input_sha256,
@@ -298,6 +366,41 @@ def test_spec_code_and_candidate_bindings_and_failed_d_report(prepared, tmp_path
     assert status.state == "failed"
     assert (backend.root / job.attempt_id / "diagnostics/validation.json").exists()
     assert not (backend.root / job.attempt_id / "result").exists()
+
+
+@pytest.mark.parametrize("when", ["before", "during"])
+def test_changed_execution_snapshot_never_becomes_repairable(prepared, tmp_path, when):
+    backend, client, profile_job, data = prepared
+    spec = freeze_spec(task_id=profile_job.task_id, input_sha256=profile_job.input_sha256,
+                       owner_id="demo", task_version=1, columns=("id", "value"),
+                       decisions=(), issues=())
+    spec_path = tmp_path / "spec.json"
+    spec_path.write_text(spec.model_dump_json(), encoding="utf-8")
+    code = tmp_path / "clean.py"
+    code.write_bytes(b"raise RuntimeError()\n")
+    job = JobRequest(profile_job.task_id, str(uuid4()), Stage.CLEAN_C, profile_job.input_sha256,
+                     spec.spec_sha256, hashlib.sha256(code.read_bytes()).hexdigest())
+    backend.prepare(job, {"data.csv": data, "spec.json": spec_path, "clean.py": code})
+    snapshot = backend.root / job.attempt_id / "input" / "clean.py"
+    client.container.files["/output/cleaned.csv"] = b"id,value\n1,a\n"
+
+    def tamper():
+        snapshot.chmod(0o600)
+        snapshot.write_bytes(b"raise RuntimeError('modified')\n")
+
+    if when == "before":
+        tamper()
+    else:
+        client.callback = tamper
+    status = backend.status(backend.submit(job, LIMITS[job.stage]))
+    manifest = json.loads(Path(status.result_ref).read_text())
+    assert status.state == "failed" and manifest["error_code"] == "ValueError"
+    assert manifest["runtime_diagnostic"] is None
+    assert not (backend.root / job.attempt_id / "result").exists()
+    if when == "before":
+        assert not client.created
+    else:
+        assert client.container.removed
 
 
 @pytest.mark.parametrize("capability", ["OSType", "SecurityOptions", "MemoryLimit",

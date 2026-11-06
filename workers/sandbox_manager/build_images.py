@@ -1,4 +1,4 @@
-"""构建固定作业镜像并可选导出离线开发包，不含云 SDK 或运行许可自动接受。"""
+"""Build a fixed job image and optionally export an offline development package without cloud SDKs or automatic acceptance of runtime licenses."""
 
 import argparse
 import json
@@ -9,20 +9,25 @@ from backend.jobs.contracts import Stage
 
 
 def bundle_sources(root: Path, target: Path, manifest: dict) -> None:
-    """白名单打包源码，明确排除密钥、任务数据、缓存、Git 和用户 CSV。"""
-    roots = ("backend", "workers", "images", "web", "deploy")
-    files = [root / name for name in ("pyproject.toml", "README.md", ".env.example")]
+    """Package allowlisted source while excluding credentials, task data, caches, Git, and user CSVs."""
+    roots = ("backend", "workers", "images", "web")
+    files = [root / name for name in (
+        "pyproject.toml", "README.md", "LICENSE", ".env.example", ".dockerignore", "start.py"
+    ) if (root / name).is_file()]
     for name in roots:
         files.extend(path for path in (root / name).rglob("*")
                      if path.is_file() and "__pycache__" not in path.parts
-                     and (path.suffix in (".py", ".md", ".html", ".css", ".js")
-                          or path.name == "Dockerfile.job"))
+                     and path.suffix in (".py", ".html", ".css", ".js"))
+    files.extend(root / "docs" / name for name in (
+        "architecture.md", "security.md", "operations.md", "testing.md"
+    ) if (root / "docs" / name).is_file())
+    files.extend(path for path in (root / "deploy").glob("Dockerfile.job") if path.is_file())
     files.extend(path for path in (root / "deploy").glob("*")
                  if path.suffix in (".lock", ".in"))
     with zipfile.ZipFile(target, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         for path in sorted(set(files)):
             relative = path.relative_to(root)
-            # 不跟随源码目录中的链接/Windows junction，避免带出工作区外文件。
+            # Do not follow source-tree links or Windows junctions outside the workspace.
             ancestors = [root / Path(*relative.parts[:index])
                          for index in range(1, len(relative.parts) + 1)]
             if not any(item.is_symlink() or (
@@ -47,7 +52,7 @@ def main() -> None:
     if client.info().get("OSType") != "linux":
         raise SystemExit("需要 Linux Docker 引擎")
     root = Path(__file__).resolve().parents[2]
-    # 构建时网络允许；执行时只用本地 ID，不自动拉取镜像/依赖。
+    # Networking is allowed for builds; execution uses local image IDs and never pulls images or dependencies.
     import re
     if not re.fullmatch(r"[a-zA-Z0-9./_-]+@sha256:[0-9a-f]{64}", args.base):
         raise SystemExit("基础镜像必须使用不可变摘要")

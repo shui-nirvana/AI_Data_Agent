@@ -1,4 +1,4 @@
-"""持久化 A -> 审批 -> C/D 编排；所有 CSV 解析与源码执行只在 worker。"""
+"""Durable A -> approval -> C/D orchestration; CSV parsing and source execution occur only in workers."""
 
 import asyncio
 from dataclasses import asdict
@@ -11,32 +11,33 @@ from backend.domain.models import TaskState
 from backend.artifacts.publication import Publisher, freeze_candidate
 from backend.domain.spec import Action, FrozenSpec
 from backend.jobs.contracts import Stage
+from backend.jobs.execution import ExecutedSource
 from backend.llm.generator import CodeVersion, UnconfiguredGenerator
 from backend.orchestration.contracts import file_hash, read_json, validate_profile
 from backend.orchestration.store import WorkflowStore, new_job
 
 
 class GraphState(TypedDict, total=False):
-    """LangGraph 状态定义，记录工作流中的各项引用和哈希"""
-    task_id: str          # 任务 ID
-    input_sha256: str     # 输入哈希
-    profile_ref: str      # 画像探查结果引用
-    issue_ref: str        # 发现的问题引用
-    spec_ref: str         # 清洗规范引用
-    spec_sha256: str      # 规范哈希
-    code_ref: str         # 代码引用
+    """LangGraph state containing workflow references and digests."""
+    task_id: str          # Task ID.
+    input_sha256: str     # Input digest.
+    profile_ref: str      # Profile reference.
+    issue_ref: str        # Findings reference.
+    spec_ref: str         # Cleaning specification reference.
+    spec_sha256: str      # Specification digest.
+    code_ref: str         # Source reference.
     code_sha256: str
     generation_kind: str
-    attempt_id: str       # 当前尝试 ID
+    attempt_id: str       # Current attempt ID.
     attempt_no: int
     repair_error: str
-    candidate_ref: str    # 候选产物引用
+    candidate_ref: str    # Candidate artifact reference.
     candidate_sha256: str
-    validation_ref: str   # 验证结果引用
+    validation_ref: str   # Validation result reference.
 
 
 def build_graph(checkpointer: object, store: WorkflowStore, generator=None):
-    """节点外部副作用用 DB 唯一阶段约束去重，恢复值只作为唤醒信号。"""
+    """Deduplicate node side effects with database stage uniqueness; resume values are wake-up signals only."""
     if checkpointer is None:
         raise ValueError("需要持久化的 LangGraph 检查点管理器")
         
@@ -125,8 +126,6 @@ def build_graph(checkpointer: object, store: WorkflowStore, generator=None):
         return code_state(code, 1)
 
     def code_state(code, attempt_no):
-        if file_hash(private(code["source_ref"]), 262144) != code["code_sha256"]:
-            raise ValueError("源码版本已改变")
         return {"code_ref": str(private(code["source_ref"])), "code_sha256": code["code_sha256"],
                 "generation_kind": code["generation_kind"], "attempt_no": attempt_no, "repair_error": ""}
 
@@ -168,13 +167,38 @@ def build_graph(checkpointer: object, store: WorkflowStore, generator=None):
         if code is None:
             previous = store.code(state["task_id"], attempt_no - 1)
             if previous is None:
-                raise ValueError("缺少上一版源码")
+                raise ValueError("缺少失败作业的执行源码记录")
+            job = store.job(state["attempt_id"])
+            evidence = json.loads(job["evidence_json"]) if job and job["evidence_json"] else {}
+            request = json.loads(job["request_json"]) if job else {}
+            if (not job or job["task_id"] != state["task_id"]
+                    or job["stage"] != Stage.CLEAN_C.value or job["state"] != "failed"
+                    or job["attempt_no"] != attempt_no - 1
+                    or job["error_code"] != state["repair_error"]
+                    or evidence.get("task_id") != state["task_id"]
+                    or evidence.get("attempt_id") != state["attempt_id"]
+                    or evidence.get("code_sha256") != request.get("code_sha256")
+                    or evidence.get("spec_sha256") != state["spec_sha256"]
+                    or evidence.get("input_sha256") != state["input_sha256"]):
+                raise ValueError("修复证据与源码尝试不匹配")
+            ref = evidence.get("executed_source_ref")
+            digest = evidence.get("executed_source_sha256")
+            if not isinstance(ref, str) or not isinstance(digest, str):
+                raise ValueError("缺少失败作业的执行源码快照")
+            expected = store.root / "worker_jobs" / state["attempt_id"] / "input" / "clean.py"
+            if Path(ref) != expected or Path(ref).is_symlink():
+                raise ValueError("执行源码快照归属不匹配")
+            source = private(ref)
+            if file_hash(source, 32768) != digest:
+                raise ValueError("执行源码快照哈希不匹配")
+            executed_source = ExecutedSource(str(source), digest, state["spec_ref"], state["profile_ref"])
+            diagnostic = evidence.get("runtime_diagnostic") if state["repair_error"] == "RUNTIME_ERROR" else None
             store.repairing(state["task_id"])
             version = asyncio.run(generator.repair(
-                CodeVersion(**previous), state["repair_error"], "[raw logs withheld]"
+                CodeVersion(**previous), state["repair_error"], diagnostic, executed_source
             ))
             code = asdict(version)
-            if code["spec_sha256"] != state["spec_sha256"] or code["code_sha256"] == previous["code_sha256"]:
+            if code["spec_sha256"] != state["spec_sha256"] or code["code_sha256"] == digest:
                 raise ValueError("修复必须产生同规范的新源码")
             store.save_code(state["task_id"], code, attempt_no)
         return code_state(code, attempt_no)
@@ -212,10 +236,10 @@ def build_graph(checkpointer: object, store: WorkflowStore, generator=None):
         Publisher(store).publish(state["task_id"])
         return {}
 
-    # 初始化状态图
+    # Initialize the state graph.
     graph = StateGraph(GraphState)
     
-    # 添加节点
+    # Add nodes.
     for name, node in (
         ("profile", profile),
         ("approval", approval),
@@ -227,7 +251,7 @@ def build_graph(checkpointer: object, store: WorkflowStore, generator=None):
     ):
         graph.add_node(name, node)
         
-    # 定义边逻辑（线性流向）
+    # Define the graph edges.
     graph.add_edge(START, "profile")
     graph.add_edge("profile", "approval")
     graph.add_conditional_edges("approval", route, {"generate": "generate", "validate": "validate"})

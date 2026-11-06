@@ -1,6 +1,6 @@
-"""
-显式的只读 A 工具注册表。不使用第三方插件发现机制。
-该模块定义了在阶段 A（画像探查）中使用的固定检测工具。
+"""Explicit read-only registry of fixed A profiling tools, without third-party plugin discovery.
+
+
 """
 
 from dataclasses import dataclass
@@ -8,16 +8,16 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class Tool:
-    """固定检测工具定义"""
-    tool_id: str      # 工具唯一 ID
-    version: str      # 工具版本
-    description: str  # 工具功能描述
+    """Fixed detection tool definition."""
+    tool_id: str      # Unique tool ID.
+    version: str      # Tool version.
+    description: str  # Tool description.
     deterministic: bool = True
     read_only: bool = True
     resource_class: str = "bounded_table"
 
 
-# 已注册的工具列表
+# Registered tools.
 TOOLS = (
     Tool("csv_structure", "0.2.0", "表头、行数和解析器约束检测"),
     Tool("missing_cells", "0.2.0", "每列空字符串计数"),
@@ -28,5 +28,5 @@ TOOLS = (
 
 
 def registered_tools() -> tuple[Tool, ...]:
-    """返回所有已注册的工具"""
+    """Return all registered tools."""
     return TOOLS

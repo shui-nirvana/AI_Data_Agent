@@ -1,4 +1,4 @@
-"""部署位置与服务后端分开配置；此模块不导入任何云或模型 SDK。"""
+"""Configure deployment location separately from service backends without importing cloud or model SDKs."""
 
 import os
 
@@ -6,7 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class IntegrationSettings(BaseModel):
-    """名称只用于选择/记录适配器，不是该平台已经通过验收的声明。"""
+    """Names select and record adapters; they do not assert platform acceptance."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
     deployment_platform: str = Field(default="local", pattern=r"^[a-z][a-z0-9_-]{0,63}$")

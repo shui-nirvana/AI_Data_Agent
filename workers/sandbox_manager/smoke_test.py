@@ -1,4 +1,4 @@
-"""本地真实 A/C/D Docker 烟测。C 是测试源码，绝不冒充 LLM 生成。"""
+"""Local real A/C/D Docker smoke test; C uses hand-written test source, not model-generated code."""
 
 import argparse
 import csv
@@ -27,7 +27,7 @@ with open('/output/cleaned.csv', 'w', newline='', encoding='utf-8') as out:
 def run_smoke(manifest: Path, output: Path) -> dict:
     configuration = json.loads(manifest.read_text(encoding="utf-8"))
     images = {Stage(key): value for key, value in configuration["images"].items()}
-    # 每轮独立目录，避免复用旧任务数据或候选。
+    # Use an independent directory for each round; never reuse prior task data or candidates.
     output = output / str(uuid4())
     output.mkdir(parents=True)
     original = output / "original.csv"

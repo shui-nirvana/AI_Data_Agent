@@ -200,7 +200,8 @@ class Publisher:
                                  "code_sha256": req.get("code_sha256"),
                                  **{k: evidence.get(k) for k in (
                                      "exit_code", "timed_out", "limit_reason", "image_id",
-                                     "elapsed_seconds", "runtime_category")}})
+                                     "elapsed_seconds", "runtime_category", "runtime_diagnostic",
+                                     "executed_source_sha256")}})
             report_bytes = json.dumps(report, sort_keys=True, ensure_ascii=True).encode()
             manifest = {"schema_version": "1.0", "task_id": task_id,
                         "input_sha256": spec.input_sha256, "spec_sha256": spec.spec_sha256,

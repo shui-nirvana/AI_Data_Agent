@@ -1,6 +1,6 @@
-"""
-控制平面小型记录；原始 CSV 和生成的代码不保存在状态中。
-该模块定义了任务的状态枚举和核心数据记录类。
+"""Small control-plane task records and state types; raw CSV and generated code are not stored in state.
+
+
 """
 
 from dataclasses import dataclass
@@ -8,47 +8,47 @@ from enum import StrEnum
 from typing import Literal
 
 
-# 模式版本，用于数据迁移和兼容性检查
+# Schema version for migration and compatibility checks.
 SCHEMA_VERSION = "1.0"
-# 问题来源类型：固定工具检测或未来可能支持的动态深度探查
+# Finding origin: fixed detection or future dynamic probing.
 IssueSource = Literal["fixed", "future_dynamic"]
 
 
 class TaskState(StrEnum):
-    """任务生命周期状态枚举"""
-    UPLOADED = "UPLOADED"              # 已上传
-    QUEUED = "QUEUED"                  # 已进入队列
-    PROFILING = "PROFILING"            # 正在进行画像探查
-    AWAITING_DECISIONS = "AWAITING_DECISIONS" # 等待用户决策审批
-    SPEC_FROZEN = "SPEC_FROZEN"        # 清洗规范已冻结
-    GENERATING = "GENERATING"          # 正在生成清洗代码
-    EXECUTING = "EXECUTING"            # 正在隔离容器中执行代码
-    REPAIRING = "REPAIRING"            # 正在尝试修复代码（自愈）
-    VALIDATING = "VALIDATING"          # 正在独立核验结果
-    VALIDATED = "VALIDATED"            # 核验通过，尚未发布；不是最终成功
-    PUBLISHING = "PUBLISHING"          # 正在发布最终产物
-    SUCCEEDED = "SUCCEEDED"            # 任务成功完成
-    FAILED = "FAILED"                  # 任务失败
-    CANCELLED = "CANCELLED"            # 任务已取消
+    """Task lifecycle states."""
+    UPLOADED = "UPLOADED"              # Uploaded.
+    QUEUED = "QUEUED"                  # Queued.
+    PROFILING = "PROFILING"            # Profiling.
+    AWAITING_DECISIONS = "AWAITING_DECISIONS" # Waiting for user approval.
+    SPEC_FROZEN = "SPEC_FROZEN"        # Cleaning specification frozen.
+    GENERATING = "GENERATING"          # Generating cleaning source.
+    EXECUTING = "EXECUTING"            # Executing in an isolated container.
+    REPAIRING = "REPAIRING"            # Attempting code repair.
+    VALIDATING = "VALIDATING"          # Independently verifying results.
+    VALIDATED = "VALIDATED"            # Validated but not yet published; not final success.
+    PUBLISHING = "PUBLISHING"          # Publishing final artifacts.
+    SUCCEEDED = "SUCCEEDED"            # Task succeeded.
+    FAILED = "FAILED"                  # Task failed.
+    CANCELLED = "CANCELLED"            # Task cancelled.
 
 
 @dataclass(frozen=True)
 class TaskRecord:
-    """任务核心记录类"""
-    task_id: str          # 唯一任务 ID
-    owner_id: str         # 所有者 ID
-    goal: str             # 业务目标描述
-    state: TaskState      # 当前状态
-    input_sha256: str     # 输入文件的 SHA-256 哈希
-    input_bytes: int      # 输入文件的大小（字节）
-    version: int          # 记录版本号（用于乐观锁或变更追踪）
-    created_at: str       # 创建时间（ISO 格式）
+    """Core task record."""
+    task_id: str          # Unique task ID.
+    owner_id: str         # Owner ID.
+    goal: str             # Business goal.
+    state: TaskState      # Current state.
+    input_sha256: str     # SHA-256 of the input file.
+    input_bytes: int      # Input file size in bytes.
+    version: int          # Record version for optimistic locking or change tracking.
+    created_at: str       # Creation time in ISO format.
 
 
 @dataclass(frozen=True)
 class TaskEvent:
-    """任务事件记录类，用于追踪进度历史"""
-    sequence: int         # 事件序号
-    task_id: str          # 关联的任务 ID
-    kind: str             # 事件类型（通常对应状态变更）
-    created_at: str       # 事件发生时间
+    """Task event record for progress history."""
+    sequence: int         # Event sequence number.
+    task_id: str          # Associated task ID.
+    kind: str             # Event type, usually a state transition.
+    created_at: str       # Event time.

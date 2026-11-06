@@ -1,4 +1,4 @@
-"""D 独立验算。只依据原件和可信冻结规范，不导入 C 或 A 的转换逻辑。"""
+"""Independent D verification based only on the original and trusted frozen specification; do not import C or A transformation logic."""
 
 import re
 from datetime import date
@@ -11,7 +11,7 @@ VALIDATOR_VERSION = "1.0"
 
 
 def expected_date(value: str, formats: tuple[str, ...]) -> str:
-    """仅匹配获批的完整格式，不启发式解析；无效日期保持原字面值。"""
+    """Match only approved complete formats without heuristics; preserve invalid dates literally."""
     patterns = {
         "YYYY-MM-DD": (r"(\d{4})-(\d{2})-(\d{2})", (0, 1, 2)),
         "YYYY/MM/DD": (r"(\d{4})/(\d{2})/(\d{2})", (0, 1, 2)),
@@ -30,8 +30,8 @@ def expected_date(value: str, formats: tuple[str, ...]) -> str:
 
 
 def verify(source: Path, candidate: Path, spec: FrozenSpec) -> dict:
-    """逐格验证，失败返回固定错误码，不把敏感原值写入日志或报告。"""
-    # 即使调用方通过 model_construct 绕过验证，这里仍重新核验可信规范。
+    """Verify cells individually and return fixed error codes without logging or reporting sensitive originals."""
+    # Revalidate the trusted specification even if a caller bypassed validation via model_construct.
     spec = FrozenSpec.model_validate(spec.model_dump(mode="json"))
     original, result = read_csv(source), read_csv(candidate)
     report = {

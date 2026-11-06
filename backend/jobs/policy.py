@@ -1,4 +1,4 @@
-"""云平台无关的执行安全要求；由 worker 的具体运行时适配器落实。"""
+"""Cloud-independent execution safety requirements enforced by the worker runtime adapter."""
 
 from dataclasses import dataclass
 from types import MappingProxyType
@@ -8,7 +8,7 @@ from backend.jobs.contracts import Stage
 
 @dataclass(frozen=True)
 class SandboxLimits:
-    """固定资源配额是应用策略，不能由模型或浏览器提交。"""
+    """Fixed resource limits are application policy, not model or browser inputs."""
 
     memory_mb: int
     cpu_seconds: int

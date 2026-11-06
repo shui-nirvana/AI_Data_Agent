@@ -1,9 +1,10 @@
-"""持久化工作流金样本测试。模拟 worker 只解析这些人工测试 CSV。"""
+"""Durable workflow golden tests; the worker double parses only these hand-written test CSVs."""
 
 import hashlib
 import json
 from pathlib import Path
 from types import SimpleNamespace
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
@@ -15,6 +16,8 @@ from backend.app import create_app
 from backend.domain.spec import Decision, FrozenSpec
 from backend.jobs.contracts import Stage
 from backend.llm.generator import CodeVersion
+from backend.llm.client import ModelGateway, ModelResponse
+from backend.llm.validation_explanation import ValidationExplainer
 from backend.orchestration.contracts import validate_profile
 from backend.orchestration.runner import GraphRunner
 from backend.orchestration.store import WorkflowConflict, WorkflowStore, process_lock
@@ -52,7 +55,7 @@ def simulated_worker(root: Path, failed=False):
         (output / "profile.json").write_text(json.dumps(profile), encoding="utf-8")
         (output / "issues.json").write_text(json.dumps(issues), encoding="utf-8")
     elif job["stage"] == Stage.CLEAN_C:
-        # 人工列出的期望，不在宿主执行任何生成源码。
+        # Hand-written expectations; do not execute generated source on the host.
         (output / "cleaned.csv").write_bytes(b"id,date,amount\n1,2026-10-31,-3\n")
     else:
         spec = FrozenSpec.model_validate_json(sources["spec.json"].read_bytes())
@@ -91,7 +94,7 @@ def test_durable_interrupt_restart_and_zero_change(setup):
     root, api, task_id = setup
     review = awaiting(setup)
     assert (root / "checkpoints.sqlite3").exists()
-    assert not GraphRunner(root).run_once()  # 审批等待无活动执行。
+    assert not GraphRunner(root).run_once()  # No execution remains active while waiting for approval.
     assert WorkflowStore(root).claim_job() is None
     body = submission(review)
     url = f"/api/tasks/{task_id}/decisions"
@@ -105,7 +108,7 @@ def test_durable_interrupt_restart_and_zero_change(setup):
     assert api.get(f"/api/tasks/{task_id}", headers=HEADERS).json()["state"] == "SUCCEEDED"
     assert api.get(f"/api/tasks/{task_id}/artifacts/output", headers=HEADERS).content == (
         root / "inputs" / f"{task_id}.csv").read_bytes()
-    # 重放全部旧 outbox，不触发新的 A/C/D，也不能回退状态。
+    # Replaying old outbox entries must not create new A/C/D jobs or roll back state.
     store = WorkflowStore(root)
     with store.db() as db:
         db.execute("UPDATE workflow_outbox SET handled=0")
@@ -138,7 +141,7 @@ def test_generation_port_c_and_d_are_distinct_and_replay_is_idempotent(setup):
                     headers=HEADERS).status_code == 200
     generator = TestGenerator(root)
     assert GraphRunner(root, generator).run_once()
-    # 恢复 wake 重放时 C 尚未完成，不能重新生成或新建 C。
+    # Replaying a resume wake before C completes must not regenerate source or create another C.
     with WorkflowStore(root).db() as db:
         db.execute("UPDATE workflow_outbox SET handled=0 WHERE dedup_key LIKE 'approval:%'")
     assert GraphRunner(root, generator).run_once()
@@ -217,7 +220,11 @@ def test_queue_worker_recovery_fails_old_attempt_without_rerun(setup):
     store = WorkflowStore(root)
     job = store.claim_job()
     removed = []
-    orphan = SimpleNamespace(remove=lambda force: removed.append(force))
+    orphan = SimpleNamespace(
+        name=f"ai-data-agent-{job['job_id']}",
+        labels={"ai-data-agent.attempt": job["job_id"], "ai-data-agent.task": task_id},
+        remove=lambda force: removed.append(force),
+    )
     backend = SimpleNamespace(client=SimpleNamespace(
         containers=SimpleNamespace(list=lambda **_: [orphan])))
     worker = QueueWorker(root, {}, backend=backend)
@@ -226,6 +233,84 @@ def test_queue_worker_recovery_fails_old_attempt_without_rerun(setup):
     assert store.job(job["job_id"])["state"] == "failed"
     GraphRunner(root).run_once()
     assert store.task(task_id)["state"] == "FAILED"
+
+
+def test_ambiguous_creation_reconciles_late_container_without_auto_resolving(setup):
+    from workers.sandbox_manager.queue_worker import QueueWorker, UnreclaimedSandbox
+    root, _, task_id = setup
+    GraphRunner(root).run_once()
+    store = WorkflowStore(root)
+    job = store.claim_job()
+    directory = root / "worker_jobs" / job["job_id"]
+    directory.mkdir(parents=True)
+    (directory / "creation.pending").touch()
+    removed = []
+    orphan = SimpleNamespace(
+        name=f"ai-data-agent-{job['job_id']}",
+        labels={"ai-data-agent.attempt": job["job_id"], "ai-data-agent.task": task_id},
+        remove=lambda force: removed.append(force),
+    )
+    containers = []
+    backend = SimpleNamespace(client=SimpleNamespace(
+        containers=SimpleNamespace(list=lambda **_: list(containers))))
+    worker = QueueWorker(root, {}, backend)
+    with pytest.raises(UnreclaimedSandbox):
+        worker.recover_interrupted()
+    assert store.job(job["job_id"])["state"] == "running"
+    containers.append(orphan)
+    with pytest.raises(UnreclaimedSandbox):
+        worker.recover_interrupted()
+    assert removed == [True]
+    assert (directory / "creation.pending").exists()
+    containers.clear()
+    # This explicit operation stands in for an operator-confirmed daemon restart.
+    worker.resolve_uncertain(job["job_id"])
+    assert store.job(job["job_id"])["error_code"] == "CREATION_UNCERTAIN_RECONCILED"
+    assert not (directory / "creation.pending").exists()
+    assert (directory / "watchdog.done").exists()
+
+
+def test_worker_does_not_finish_job_after_ambiguous_create(setup):
+    from test_docker_worker import Client, FakeWatchdog, IMAGE
+    from workers.sandbox_manager.docker_backend import DockerExecutionBackend
+    from workers.sandbox_manager.queue_worker import QueueWorker, UnreclaimedSandbox
+    root, _, _ = setup
+    GraphRunner(root).run_once()
+    client = Client()
+    client.containers.list = lambda **kwargs: []
+
+    def lost_response(*args, **kwargs):
+        raise TimeoutError("simulated lost response")
+
+    client.containers.create = lost_response
+    backend = DockerExecutionBackend(root / "worker_jobs", dict.fromkeys(Stage, IMAGE),
+                                     client, watchdog_factory=FakeWatchdog)
+    worker = QueueWorker(root, backend.images, backend)
+    with pytest.raises(UnreclaimedSandbox):
+        worker.run_once()
+    with worker.store.db() as db:
+        job = db.execute("SELECT * FROM workflow_jobs").fetchone()
+    assert job["state"] == "running"
+    assert (root / "worker_jobs" / job["job_id"] / "creation.pending").exists()
+    with pytest.raises(UnreclaimedSandbox):
+        worker.run_once()
+
+
+def test_legacy_running_attempt_without_watchdog_requires_confirmation(setup):
+    from workers.sandbox_manager.queue_worker import QueueWorker, UnreclaimedSandbox
+    root, _, _ = setup
+    GraphRunner(root).run_once()
+    store = WorkflowStore(root)
+    job = store.claim_job()
+    directory = root / "worker_jobs" / job["job_id"]
+    directory.mkdir(parents=True)
+    backend = SimpleNamespace(client=SimpleNamespace(
+        containers=SimpleNamespace(list=lambda **_: [])))
+    worker = QueueWorker(root, {}, backend)
+    with pytest.raises(UnreclaimedSandbox):
+        worker.recover_interrupted()
+    assert (directory / "creation.pending").exists()
+    assert store.job(job["job_id"])["state"] == "running"
 
 
 def test_process_lock_prevents_two_runners(setup):
@@ -272,7 +357,7 @@ def test_cleanup_failure_stops_worker_and_keeps_attempt_for_recovery(setup):
         worker.run_once()
     with WorkflowStore(root).db() as db:
         assert db.execute("SELECT state FROM workflow_jobs").fetchone()[0] == "running"
-    assert worker.run_once() is False  # 重启式对账后失败，不重复执行源码。
+    assert worker.run_once() is False  # Fail after restart reconciliation without rerunning source.
     assert len(calls) == 1
 
 
@@ -282,3 +367,242 @@ def test_profile_omitted_findings_are_rejected(setup):
     profile["status"] = "completed"
     with pytest.raises(ValueError, match="不完整"):
         validate_profile(profile, issues[:-1], profile["input_sha256"])
+
+
+class ExplanationModel:
+    def __init__(self, invalid=False, fail=False):
+        self.calls, self.invalid, self.fail = [], invalid, fail
+
+    async def complete(self, request):
+        self.calls.append(request)
+        if self.fail:
+            raise RuntimeError("private provider error")
+        facts = json.loads(request.messages[-1].content)
+        result = {"items": [{"check": item["id"], "style": "plain"} for item in facts["checks"]]}
+        return ModelResponse(request_id=request.request_id, provider="fake", model="fake",
+                             text="invalid" if self.invalid else json.dumps(result),
+                             finish_reason="completed", input_tokens=20, output_tokens=12)
+
+
+def finish_preserved(setup):
+    root, api, task_id = setup
+    review = awaiting(setup)
+    assert api.post(f"/api/tasks/{task_id}/decisions", json=submission(review), headers=HEADERS).status_code == 200
+    assert GraphRunner(root).run_once()
+    assert simulated_worker(root)["stage"] == Stage.VERIFY_D
+    assert GraphRunner(root).run_once()
+    assert WorkflowStore(root).task(task_id)["state"] == "SUCCEEDED"
+
+
+def test_on_demand_explanation_is_private_idempotent_and_separate_from_d(setup):
+    root, api, task_id = setup
+    finish_preserved(setup)
+    url = f"/api/tasks/{task_id}/validation-explanation"
+    assert api.get(url).status_code == 401
+    assert api.post(url).status_code == 401
+    assert api.get(url, headers=HEADERS).json()["status"] == "not_requested"
+    before = api.get(f"/api/tasks/{task_id}/evidence", headers=HEADERS).json()
+    output = api.get(f"/api/tasks/{task_id}/artifacts/output", headers=HEADERS).content
+    model = ExplanationModel()
+    runner = GraphRunner(root, explainer=ValidationExplainer(ModelGateway(model)))
+    assert not runner.run_once()
+    assert len(model.calls) == 0
+    assert api.post(url, headers=HEADERS).json()["status"] == "pending"
+    assert api.post(url, headers=HEADERS).json()["status"] == "pending"
+    assert runner.run_once()
+    result = api.get(url, headers=HEADERS).json()
+    assert result["status"] == "completed"
+    assert "D 独立验证结论：通过" in result["result"]["text"]
+    assert "实际变更 0 格，不匹配 0 格" in result["result"]["text"]
+    assert "本次全部保留，要求输入与输出的完整字节相同" in result["result"]["text"]
+    assert result["result"]["input_tokens"] == 20
+    assert len(model.calls) == 1
+    sent = model.calls[0].messages[-1].content
+    for forbidden in ("amount", "date", "2026", "Preserve refunds", task_id):
+        assert forbidden not in sent
+    assert api.post(url, headers=HEADERS).json()["status"] == "completed"
+    with WorkflowStore(root).db() as db:
+        db.execute("UPDATE workflow_outbox SET handled=0 WHERE dedup_key=?", (f"explain:{task_id}",))
+    assert runner.run_once()
+    assert not runner.run_once()
+    assert len(model.calls) == 1
+    assert api.get(f"/api/tasks/{task_id}/evidence", headers=HEADERS).json() == before
+    assert api.get(f"/api/tasks/{task_id}/artifacts/output", headers=HEADERS).content == output
+
+
+@pytest.mark.parametrize("change_cells", [False, True])
+def test_byte_check_uses_approved_rules_not_change_count(setup, change_cells):
+    root, api, task_id = setup
+    review = awaiting(setup)
+    body = submission(review, True)
+    if not change_cells:
+        for decision in body["decisions"]:
+            if decision["action"] == "normalize_date":
+                decision["params"]["input_formats"] = ["DD-MM-YYYY"]
+    assert api.post(f"/api/tasks/{task_id}/decisions", json=body, headers=HEADERS).status_code == 200
+    assert GraphRunner(root, TestGenerator(root)).run_once()
+    if change_cells:
+        simulated_worker(root)
+    else:
+        store = WorkflowStore(root)
+        job = store.claim_job()
+        result_dir = root / "worker_jobs" / job["job_id"] / "result"
+        result_dir.mkdir(parents=True)
+        (result_dir / "cleaned.csv").write_bytes((root / "inputs" / f"{task_id}.csv").read_bytes())
+        store.finish_job(job["job_id"], "finished", str(result_dir), None)
+    assert GraphRunner(root).run_once()
+    simulated_worker(root)
+    assert GraphRunner(root).run_once()
+    model = ExplanationModel()
+    url = f"/api/tasks/{task_id}/validation-explanation"
+    assert api.post(url, headers=HEADERS).status_code == 202
+    assert GraphRunner(root, explainer=ValidationExplainer(ModelGateway(model))).run_once()
+    result = api.get(url, headers=HEADERS).json()["result"]["text"]
+    assert "本次批准了修改，不要求输入与输出的完整字节相同" in result
+    assert f"实际变更 {1 if change_cells else 0} 格" in result
+    assert "all_preserved" not in model.calls[0].messages[-1].content
+
+
+def test_existing_explanation_is_corrected_and_unbound_spec_does_not_guess(setup):
+    root, api, task_id = setup
+    finish_preserved(setup)
+    url = f"/api/tasks/{task_id}/validation-explanation"
+    assert api.post(url, headers=HEADERS).status_code == 202
+    model = ExplanationModel()
+    assert GraphRunner(root, explainer=ValidationExplainer(ModelGateway(model))).run_once()
+    store = WorkflowStore(root)
+    with store.db() as db:
+        row = db.execute("SELECT result_json FROM validation_explanations WHERE task_id=?", (task_id,)).fetchone()
+        result = json.loads(row["result_json"])
+        result["text"] = "全保留字节检查：通过。"
+        db.execute("UPDATE validation_explanations SET result_json=? WHERE task_id=?",
+                   (json.dumps(result), task_id))
+    assert "本次全部保留" in api.get(url, headers=HEADERS).json()["result"]["text"]
+    with store.db() as db:
+        db.execute("UPDATE workflows SET spec_json=? WHERE task_id=?", ("{}", task_id))
+    text = api.get(url, headers=HEADERS).json()["result"]["text"]
+    assert "仅全保留时要求" in text
+    assert "本次全部保留" not in text and "本次批准了修改" not in text
+    assert len(model.calls) == 1
+
+
+def test_concurrent_requests_share_one_explanation_event(setup):
+    root, api, task_id = setup
+    finish_preserved(setup)
+    url = f"/api/tasks/{task_id}/validation-explanation"
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        responses = list(pool.map(lambda _: api.post(
+            url, headers=HEADERS, json={"verdict": "invented"}), range(4)))
+    assert all(response.status_code == 202 and response.json()["status"] == "pending"
+               for response in responses)
+    with WorkflowStore(root).db() as db:
+        assert db.execute("SELECT count(*) FROM validation_explanations").fetchone()[0] == 1
+        assert db.execute("SELECT count(*) FROM workflow_outbox WHERE dedup_key=?",
+                          (f"explain:{task_id}",)).fetchone()[0] == 1
+    model = ExplanationModel()
+    assert GraphRunner(root, explainer=ValidationExplainer(ModelGateway(model))).run_once()
+    assert len(model.calls) == 1
+    facts = json.loads(model.calls[0].messages[-1].content)
+    assert facts["verdict"] == "passed"
+
+
+def test_missing_model_explanation_leaves_completed_task_available(setup):
+    root, api, task_id = setup
+    finish_preserved(setup)
+    url = f"/api/tasks/{task_id}/validation-explanation"
+    api.post(url, headers=HEADERS)
+    assert GraphRunner(root).run_once()
+    assert api.get(url, headers=HEADERS).json()["error_code"] == "EXPLANATION_MODEL_UNAVAILABLE"
+    assert api.get(f"/api/tasks/{task_id}", headers=HEADERS).json()["state"] == "SUCCEEDED"
+    assert api.get(f"/api/tasks/{task_id}/artifacts/output", headers=HEADERS).status_code == 200
+
+
+def test_unbound_d_report_is_not_sent_to_model(setup):
+    root, api, task_id = setup
+    finish_preserved(setup)
+    store = WorkflowStore(root)
+    with store.db() as db:
+        report = json.loads(db.execute("SELECT validation_json FROM workflows WHERE task_id=?",
+                                       (task_id,)).fetchone()[0])
+        report["spec_sha256"] = "0" * 64
+        db.execute("UPDATE workflows SET validation_json=? WHERE task_id=?", (json.dumps(report), task_id))
+    url = f"/api/tasks/{task_id}/validation-explanation"
+    assert api.post(url, headers=HEADERS).status_code == 409
+    assert api.get(url, headers=HEADERS).json()["status"] == "not_requested"
+
+
+@pytest.mark.parametrize("invalid", [False, True])
+def test_explanation_failure_does_not_change_task_or_retry(setup, invalid):
+    root, api, task_id = setup
+    finish_preserved(setup)
+    url = f"/api/tasks/{task_id}/validation-explanation"
+    before = api.get(f"/api/tasks/{task_id}/evidence", headers=HEADERS).json()
+    model = ExplanationModel(invalid=invalid, fail=not invalid)
+    runner = GraphRunner(root, explainer=ValidationExplainer(ModelGateway(model)))
+    assert api.post(url, headers=HEADERS).status_code == 202
+    assert runner.run_once()
+    response = api.get(url, headers=HEADERS).json()
+    assert response["status"] == "failed"
+    assert response["error_code"] == ("INVALID_MODEL_EXPLANATION" if invalid else "EXPLANATION_MODEL_UNAVAILABLE")
+    assert "private provider error" not in json.dumps(response)
+    if invalid:
+        assert response["result"]["input_tokens"] == 20
+    assert api.post(url, headers=HEADERS).json()["status"] == "failed"
+    assert not runner.run_once() and len(model.calls) == 1
+    assert api.get(f"/api/tasks/{task_id}/evidence", headers=HEADERS).json() == before
+    assert api.get(f"/api/tasks/{task_id}/artifacts/output", headers=HEADERS).status_code == 200
+
+
+def test_interrupted_explanation_never_repeats_external_call(setup):
+    root, api, task_id = setup
+    finish_preserved(setup)
+    url = f"/api/tasks/{task_id}/validation-explanation"
+    api.post(url, headers=HEADERS)
+    assert WorkflowStore(root).claim_validation_explanation(task_id)
+    model = ExplanationModel()
+    runner = GraphRunner(root, explainer=ValidationExplainer(ModelGateway(model)))
+    assert runner.run_once()
+    result = api.get(url, headers=HEADERS).json()
+    assert result["status"] == "failed" and result["error_code"] == "EXPLANATION_CALL_UNCERTAIN"
+    assert not model.calls and not runner.run_once()
+    assert api.get(f"/api/tasks/{task_id}", headers=HEADERS).json()["state"] == "SUCCEEDED"
+
+
+@pytest.mark.parametrize("structural", [False, True])
+def test_explanation_never_overrides_rejected_d(setup, structural):
+    root, api, task_id = setup
+    review = awaiting(setup)
+    assert api.post(f"/api/tasks/{task_id}/decisions", json=submission(review, True), headers=HEADERS).status_code == 200
+    assert GraphRunner(root, TestGenerator(root)).run_once()
+    store = WorkflowStore(root)
+    clean = store.claim_job()
+    assert clean["stage"] == Stage.CLEAN_C
+    result_dir = root / "worker_jobs" / clean["job_id"] / "result"
+    result_dir.mkdir(parents=True)
+    candidate = (b"id,date,amount,extra\n1,2026/10/31,-3,x\n" if structural
+                 else b"id,date,amount\n1,2026/10/31,-3\n")
+    (result_dir / "cleaned.csv").write_bytes(candidate)
+    store.finish_job(clean["job_id"], "finished", str(result_dir), None)
+    assert GraphRunner(root).run_once()
+    job = store.claim_job()
+    assert job["stage"] == Stage.VERIFY_D
+    sources = {name: Path(ref) for name, ref in json.loads(job["sources_json"]).items()}
+    spec = FrozenSpec.model_validate_json(sources["spec.json"].read_bytes())
+    report = verify(sources["data.csv"], sources["candidate.csv"], spec)
+    assert report["verdict"] == "rejected"
+    store.finish_job(job["job_id"], "failed", None, "VALIDATION_REJECTED", {"validation": report})
+    assert GraphRunner(root).run_once()
+    assert store.task(task_id)["state"] == "FAILED"
+    url = f"/api/tasks/{task_id}/validation-explanation"
+    model = ExplanationModel()
+    assert api.post(url, headers=HEADERS).status_code == 202
+    assert GraphRunner(root, explainer=ValidationExplainer(ModelGateway(model))).run_once()
+    text = api.get(url, headers=HEADERS).json()["result"]["text"]
+    assert "D 独立验证结论：未通过" in text
+    if structural:
+        assert "未进行逐格比较" in text and "不匹配 0 格" not in text
+        assert "mismatch_count" not in model.calls[0].messages[-1].content
+    else:
+        assert "不匹配 1 格" in text
+    assert store.task(task_id)["state"] == "FAILED"
+    assert api.get(f"/api/tasks/{task_id}/artifacts/output", headers=HEADERS).status_code == 409

@@ -1,6 +1,6 @@
-"""
-Worker 策略大纲；绝不允许使用非沙箱的回退方案。
-该模块定义了沙箱环境的资源限制和调度逻辑。
+"""Worker policy and scheduling; never fall back to unsandboxed execution.
+
+
 """
 
 from backend.jobs.contracts import JobRequest, Stage
@@ -11,17 +11,17 @@ from backend.jobs.policy import LIMITS, SandboxLimits
 
 
 class SandboxManager:
-    """调度门面，不绑定 Vultr 或 AWS；仅受信启动代码注入适配器。"""
+    """Scheduling facade independent of Vultr and AWS; only trusted startup code injects adapters."""
 
     def __init__(self, backend: ExecutionBackend | None = None) -> None:
         self.backend = backend if backend is not None else DisabledExecutionBackend()
 
     def submit(self, job: JobRequest) -> ExecutionReceipt:
-        """
-        提交作业到沙箱执行。
-        
-        参数:
-            job: 作业请求对象。
+        """Submit a job request for sandbox execution.
+
+
+
+
         """
         if job.stage not in LIMITS:
             raise ValueError("未知的作业阶段")

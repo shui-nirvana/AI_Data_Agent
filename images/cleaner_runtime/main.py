@@ -1,6 +1,6 @@
-"""
-C 固定容器内入口；只允许 worker 在受限 Linux 容器内运行。
-源码始终不可信。API/Graph Runner 不得导入调用本模块。
+"""Fixed C entrypoint for restricted Linux containers only. Source is untrusted; the API and Graph Runner must not import or invoke it.
+
+
 """
 
 import os
@@ -14,10 +14,10 @@ from backend.domain.spec import FrozenSpec
 
 
 def main() -> None:
-    """清洗程序主入口"""
+    """Cleaning program entrypoint."""
     if os.environ.get("AI_AGENT_SANDBOX_JOB") != "CLEAN_C":
         raise SystemExit("C 仅允许在受信 worker 创建的受限容器中运行")
-    # 环境标识不是沙箱安全边界；边界由 worker 的实际 Docker 配置保证。
+    # The environment flag is not a sandbox boundary; the worker's Docker configuration enforces isolation.
     with Path("/input/spec.json").open("rb") as stream:
         content = stream.read(262145)
     if len(content) > 262144:
@@ -28,7 +28,7 @@ def main() -> None:
     violation = False
 
     def audit(event, args):
-        """额外保守拒绝与分类，不代替 Docker 隔离；捕获后吞掉异常也算违规。"""
+        """Conservative extra rejection and classification, not a replacement for Docker isolation; swallowing an exception still counts as a violation."""
         nonlocal violation
         denied = event.startswith(("socket.", "subprocess.", "ctypes."))
         denied = denied or event in ("os.system", "os.fork", "os.exec", "os.posix_spawn")
@@ -47,19 +47,40 @@ def main() -> None:
 
     sys.addaudithook(audit)
     category = "completed"
+    diagnostic = None
     try:
         runpy.run_path("/input/clean.py", run_name="__main__")
     except (PermissionError, OSError, MemoryError, csv.Error, UnicodeError):
         category = "restricted_or_input_error"
     except (SyntaxError, NameError, TypeError, AttributeError, KeyError, IndexError,
-            ValueError, ImportError, RuntimeError, ZeroDivisionError):
-        # 不保存异常消息/堆栈。只产生粗粒度安全反馈，禁止模型猜测业务值。
+            ValueError, ImportError, RuntimeError, ZeroDivisionError) as exc:
         category = "runtime_error"
+        allowed = (NameError, TypeError, AttributeError, KeyError, IndexError,
+                   ValueError, ImportError, RuntimeError, ZeroDivisionError)
+        if type(exc) in allowed:
+            tb = exc.__traceback__
+            while tb is not None:
+                if tb.tb_frame.f_code.co_filename == "/input/clean.py":
+                    diagnostic = {"exception_type": type(exc).__name__, "line": tb.tb_lineno}
+                tb = tb.tb_next
+            # Exact fixed messages map to an enum; never retain or forward the message.
+            if (diagnostic is not None and type(exc) is TypeError
+                    and len(exc.args) == 1 and type(exc.args[0]) is str
+                    and exc.args[0] in (
+                        "Path.open() got an unexpected keyword argument 'strict'",
+                        "'strict' is an invalid keyword argument for open()",
+                    )):
+                diagnostic["reason"] = "OPEN_STRICT_UNSUPPORTED"
     except BaseException:
         category = "unknown_error"
     if violation:
         category = "security_violation"
-    Path("/tmp/runtime.json").write_text(json.dumps({"category": category}), encoding="utf-8")
+        diagnostic = None
+    # Do not collect exception messages, variables, file contents, or stack traces; the worker must bind this untrusted hint to the source.
+    result = {"category": category}
+    if diagnostic is not None:
+        result["diagnostic"] = diagnostic
+    Path("/tmp/runtime.json").write_text(json.dumps(result), encoding="utf-8")
     if category != "completed":
         raise SystemExit(1)
 

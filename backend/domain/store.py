@@ -1,6 +1,6 @@
-"""
-SQLite 任务元数据存储，供 API 与独立编排存储使用。
-该模块负责管理任务和事件的持久化，使用 SQLite 作为后端存储。
+"""SQLite task and event metadata storage for the API and independent orchestration store.
+
+
 """
 
 import sqlite3
@@ -12,18 +12,18 @@ from backend.domain.models import TaskEvent, TaskRecord, TaskState
 
 
 def _now() -> str:
-    """返回当前 UTC 时间的 ISO 格式字符串"""
+    """Return the current UTC time in ISO format."""
     return datetime.now(timezone.utc).isoformat()
 
 
 class TaskStore:
-    """任务存储管理类，封装了所有数据库操作"""
+    """Manage task database operations."""
     def __init__(self, path: Path) -> None:
-        """
-        初始化存储并确保表结构存在。
-        
-        参数:
-            path: SQLite 数据库文件路径。
+        """Initialize the SQLite database and ensure its schema exists.
+
+
+
+
         """
         self.path = path
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -53,10 +53,10 @@ class TaskStore:
 
     @contextmanager
     def _connect(self):
-        """事务结束时提交/回滚并关闭连接，不在审批等待期间持有连接。"""
+        """Commit or roll back and close each connection; do not hold one during approval."""
         db = sqlite3.connect(self.path, timeout=5)
-        db.row_factory = sqlite3.Row # 支持通过列名访问结果
-        db.execute("PRAGMA foreign_keys=ON") # 启用外键约束
+        db.row_factory = sqlite3.Row # Enable column-name access to rows.
+        db.execute("PRAGMA foreign_keys=ON") # Enable foreign key constraints.
         try:
             with db:
                 yield db
@@ -67,15 +67,15 @@ class TaskStore:
         self, task_id: str, owner_id: str, goal: str, digest: str, size: int,
         max_active: int | None = None,
     ) -> TaskRecord:
-        """
-        在数据库中创建新任务和初始事件。
-        
-        参数:
-            task_id: 唯一任务 ID。
-            owner_id: 所有者 ID。
-            goal: 任务目标。
-            digest: 文件 SHA-256 哈希。
-            size: 文件大小（字节）。
+        """Create a task and initial event with its owner, goal, input digest, and byte size.
+
+
+
+
+
+
+
+
         """
         created_at = _now()
         with self._connect() as db:
@@ -95,8 +95,8 @@ class TaskStore:
         return self.get(task_id, owner_id)
 
     def get(self, task_id: str, owner_id: str) -> TaskRecord | None:
-        """
-        根据 ID 和所有者获取任务详情。
+        """Get a task by ID and owner.
+
         """
         with self._connect() as db:
             row = db.execute(
@@ -117,12 +117,12 @@ class TaskStore:
         )
 
     def events(self, task_id: str, after: int) -> list[TaskEvent]:
-        """
-        获取指定序号之后的任务事件。
-        
-        参数:
-            task_id: 任务 ID。
-            after: 起始序号（不包含该序号）。
+        """Get task events after the exclusive sequence number.
+
+
+
+
+
         """
         with self._connect() as db:
             rows = db.execute(
@@ -135,8 +135,8 @@ class TaskStore:
         ]
 
     def cancel(self, task_id: str, owner_id: str) -> TaskRecord | None:
-        """
-        如果任务尚未完成或失败，则将其标记为已取消。
+        """Cancel the task unless it has already reached a terminal state.
+
         """
         with self._connect() as db:
             db.execute("BEGIN IMMEDIATE")
@@ -146,7 +146,7 @@ class TaskStore:
             ).fetchone()
             if row is None:
                 return None
-            # 仅允许取消非终态的任务
+            # Only non-terminal tasks may be cancelled.
             if row["state"] not in (TaskState.CANCELLED, TaskState.SUCCEEDED, TaskState.FAILED):
                 db.execute(
                     "UPDATE tasks SET state=?, version=version+1 WHERE task_id=?",

@@ -1,7 +1,7 @@
-"""
-作业 A 的受限启动扫描器；不要在 FastAPI 进程中运行。
-这是一个开发阶段的入口点，并非经过验证的生产环境沙箱镜像。
-该模块负责在隔离环境中解析 CSV，生成画像报告和初步问题发现。
+"""Restricted A profiler entrypoint for isolated CSV parsing; do not run inside FastAPI or treat this development entrypoint as a certified production sandbox.
+
+
+
 """
 
 import csv
@@ -17,15 +17,15 @@ from backend.domain.csv_policy import CSV_POLICY, PARSER_VERSION
 from images.csv_input import read_csv
 from images.profiler.registry import registered_tools
 
-# 解析限额统一来自 CSV_POLICY；资源限制仍需容器运行时实际施加。
+# CSV_POLICY supplies parsing limits; the container runtime must still enforce resource limits.
 
 
 def scan(source: Path) -> tuple[dict, list[dict]]:
-    """
-    扫描 CSV 文件并提取画像和问题。
-    
-    参数:
-        source: 输入 CSV 文件路径。
+    """Scan a CSV source and return its profile and findings.
+
+
+
+
     """
     table = read_csv(source)
     header = table.columns
@@ -52,7 +52,7 @@ def scan(source: Path) -> tuple[dict, list[dict]]:
                         continue
                     dates[index][name] += 1
                     break
-            # 不解析科学记数法、NaN/Infinity、货币符号或千位分隔，不猜格式。
+            # Do not parse scientific notation, NaN/Infinity, currency, or thousands separators, or guess formats.
             if len(value) <= 128 and re.fullmatch(r"[+-]?[0-9]+(?:\.[0-9]+)?", value):
                 number = Decimal(value)
                 stats = numeric[index]
@@ -92,7 +92,7 @@ def scan(source: Path) -> tuple[dict, list[dict]]:
             "input_sha256": table.sha256, "column": column, "affected_count": count,
             "predicate_id": predicate, "actions": actions,
         })
-    # 固定发现先分工具记录，后合并为单列卡片；MVP 每列只选一个动作。
+    # Record findings by tool, then merge by column; the MVP permits one action per column.
     for index, name in enumerate(header):
         if missing[index]:
             issue("missing_cells", name, missing[index], "empty_string",
@@ -104,7 +104,7 @@ def scan(source: Path) -> tuple[dict, list[dict]]:
         if numeric[index]["negative_count"]:
             issue("numeric_range", name, numeric[index]["negative_count"], "negative_number",
                   ["preserve"])
-    # 重复行只作数据集级提示，不参与单列审批集合。
+    # Duplicate rows are dataset-level notices, not column approval items.
     profile["observations"] = [{"kind": "duplicate_rows", "affected_count": duplicates,
                                "actionable": False}] if duplicates else []
     cards = []
@@ -122,8 +122,8 @@ def scan(source: Path) -> tuple[dict, list[dict]]:
 
 
 def main() -> None:
-    """容器内执行主函数"""
-    # 约定好的容器内部路径
+    """In-container main entrypoint."""
+    # Fixed in-container paths.
     target = Path("/output")
     target.mkdir(parents=True, exist_ok=True)
     try:

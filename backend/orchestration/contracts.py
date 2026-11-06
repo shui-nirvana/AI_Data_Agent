@@ -1,4 +1,4 @@
-"""控制层只校验有界 JSON 证据与哈希，绝不解析原始 CSV。"""
+"""The control plane validates bounded JSON evidence and hashes; it never parses raw CSV."""
 
 import hashlib
 import json
@@ -18,7 +18,7 @@ def read_json(path: Path, limit: int = 1_000_000):
 
 
 def file_hash(path: Path, limit: int) -> str:
-    """读取字节验证内容绑定，不解释 CSV 字段。"""
+    """Read bytes to verify content binding without interpreting CSV fields."""
     if path.is_symlink() or not path.is_file():
         raise ValueError("产物必须是普通文件")
     digest, size = hashlib.sha256(), 0
@@ -32,7 +32,7 @@ def file_hash(path: Path, limit: int) -> str:
 
 
 def validate_profile(profile, issues, digest: str):
-    """接受固定扫描器版本/完整工具集合，拒绝损坏或不完整的审批证据。"""
+    """Accept the fixed scanner version and complete tool set; reject damaged or incomplete approval evidence."""
     if not isinstance(profile, dict) or not isinstance(issues, list):
         raise ValueError("A 输出类型错误")
     if (profile.get("schema_version") != "1.0" or profile.get("scanner_version") != "0.2.0"

@@ -1,4 +1,4 @@
-"""受信组合入口：在启动时注入适配器，而不是在业务中按云/模型分支。"""
+"""Trusted composition root: inject adapters at startup instead of branching on cloud or model in business logic."""
 
 from dataclasses import dataclass
 from pathlib import Path
@@ -20,10 +20,10 @@ def build_dependencies(
     execution: ExecutionBackend | None = None,
     model_client: ModelClient | None = None,
 ) -> ApplicationDependencies:
-    """目前只内置 disabled；具体适配器由未来受信启动模块提供。
+    """Only disabled is built in. A deployment label does not enable execution; reject unregistered adapters without falling back to network or local execution.
 
-    切换到 AWS 只改变 deployment_platform，不会自动切换执行方式。
-    配置一个未注入的执行/模型后端时直接失败，不默认联网或本机执行。
+
+
     """
     settings = settings if settings is not None else IntegrationSettings.from_environment()
     if settings.execution_backend != "disabled" and execution is None:
@@ -38,18 +38,23 @@ def build_dependencies(
 
 
 def build_generator(root: Path, settings: IntegrationSettings | None = None):
-    """仅 Graph Runner 启动时选择模型；API 默认仍不构造带密钥的客户端。"""
+    """Select a model only in the Graph Runner; the API does not construct a credentialed client by default."""
     from backend.llm.generator import LLMCodeGenerator, UnconfiguredGenerator
     settings = settings if settings is not None else IntegrationSettings.from_environment()
     if settings.llm_provider == "disabled":
         return UnconfiguredGenerator()
-    if settings.llm_provider != "deepseek":
+    if settings.llm_provider not in ("deepseek", "vultr"):
         raise ValueError("模型提供方未实现，不自动切换")
     if __import__("os").environ.get("AI_AGENT_LLM_ALLOW_EXTERNAL") != "true":
-        raise ValueError("请显式授权 AI_AGENT_LLM_ALLOW_EXTERNAL=true（仅匿名规范与聚合统计）")
-    from backend.llm.deepseek import DeepSeekClient
+        raise ValueError("请显式授权 AI_AGENT_LLM_ALLOW_EXTERNAL=true（包括修复时的执行源码）")
+    if settings.llm_provider == "deepseek":
+        from backend.llm.deepseek import DeepSeekClient
+        client = DeepSeekClient.from_environment(settings.llm_model)
+    else:
+        from backend.llm.vultr import VultrInferenceClient
+        client = VultrInferenceClient.from_environment(settings.llm_model)
     from backend.orchestration.store import WorkflowStore
     return LLMCodeGenerator(
-        root, ModelGateway(DeepSeekClient.from_environment(settings.llm_model)),
+        root, ModelGateway(client),
         check_active=WorkflowStore(root).check_active,
     )

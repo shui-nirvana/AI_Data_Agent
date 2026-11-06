@@ -1,6 +1,7 @@
-"""独立单机 Graph Runner；只消费 DB/outbox，不导入 Docker 或 CSV 解析器。"""
+"""Independent single-host Graph Runner consuming the database and outbox without importing Docker or CSV parsers."""
 
 import argparse
+import asyncio
 import os
 from pathlib import Path
 import time
@@ -10,9 +11,15 @@ from backend.orchestration.store import TERMINAL, WorkflowStore, process_lock
 
 
 class GraphRunner:
-    def __init__(self, root: Path, generator=None):
+    def __init__(self, root: Path, generator=None, explainer=None):
         self.store = WorkflowStore(root)
         self.generator = generator
+        if explainer is None:
+            from backend.llm.generator import LLMCodeGenerator
+            from backend.llm.validation_explanation import ValidationExplainer
+            if isinstance(generator, LLMCodeGenerator):
+                explainer = ValidationExplainer(generator.gateway)
+        self.explainer = explainer
         # Older checkpoints ended at VALIDATED; revalidate their stored D binding
         # rather than silently treating them as already published.
         with self.store.db() as db:
@@ -20,12 +27,16 @@ class GraphRunner:
                 self.store.wake(db, row["task_id"], f"publish:{row['task_id']}")
 
     def run_once(self) -> bool:
-        # SQLite checkpoint 的同一 thread_id 不允许被两个本地进程同时推进。
+        # Do not advance the same SQLite checkpoint thread from two local processes.
         with process_lock(self.store.root, "graph-runner"):
             event = self.store.next_event()
             if event is None:
                 return False
             task_id = event["task_id"]
+            if event["dedup_key"] == f"explain:{task_id}":
+                self._explain(task_id)
+                self.store.ack(event["id"])
+                return True
             task = self.store.task(task_id)
             if task["state"] in TERMINAL:
                 self.store.ack(event["id"])
@@ -33,7 +44,7 @@ class GraphRunner:
             from langgraph.checkpoint.sqlite import SqliteSaver
             from langgraph.types import Command
 
-            # 默认禁止工作流状态被环境中的 tracing 开关外发。
+            # Disable environment-controlled workflow tracing by default.
             os.environ["LANGSMITH_TRACING"] = "false"
             os.environ["LANGCHAIN_TRACING_V2"] = "false"
             with SqliteSaver.from_conn_string(str(self.store.root / "checkpoints.sqlite3")) as saver:
@@ -62,13 +73,34 @@ class GraphRunner:
                         from backend.artifacts.publication import Publisher
                         Publisher(self.store).publish(task_id)
                 except Exception as exc:
-                    # 源数据、字段名、模型异常消息都不写入公开事件。
+                    # Do not put source data, column names, or model exception messages in public events.
                     from backend.artifacts.publication import ArtifactIntegrityError
                     code = str(exc) if isinstance(exc, ArtifactIntegrityError) else type(exc).__name__
                     self.store.fail(task_id, code)
-            # 先提交 checkpoint 再 ack。崩溃后重复事件只恢复已持久化的游标。
+            # Commit the checkpoint before acknowledgement; replay resumes the persisted cursor.
             self.store.ack(event["id"])
             return True
+
+    def _explain(self, task_id):
+        from backend.llm.client import ModelUnavailableError
+        from backend.llm.validation_explanation import InvalidExplanation
+        facts = self.store.claim_validation_explanation(task_id)
+        if facts is None:
+            return
+        try:
+            if self.explainer is None:
+                raise ModelUnavailableError("未配置验证解释模型")
+            result = asyncio.run(self.explainer.explain(task_id, facts))
+        except Exception as exc:
+            error = ("INVALID_MODEL_EXPLANATION" if isinstance(exc, InvalidExplanation)
+                     else "EXPLANATION_MODEL_UNAVAILABLE")
+            usage = None
+            if isinstance(exc, (InvalidExplanation, ModelUnavailableError)):
+                if exc.input_tokens is not None or exc.output_tokens is not None:
+                    usage = {"input_tokens": exc.input_tokens, "output_tokens": exc.output_tokens}
+            self.store.finish_validation_explanation(task_id, result=usage, error_code=error)
+            return
+        self.store.finish_validation_explanation(task_id, result=result)
 
 
 def main() -> None:

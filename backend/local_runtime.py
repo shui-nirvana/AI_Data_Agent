@@ -169,6 +169,7 @@ def supervise(root: Path, images: Path, port: int):
         stop_request = root / "stop.request"
         stop_request.unlink(missing_ok=True)
         common = dict(os.environ, AI_AGENT_DATA_DIR=str(root))
+        common.pop("VULTR_API_KEY", None)
         if not common.get("AI_AGENT_DEMO_TOKEN"):
             raise ValueError("Set AI_AGENT_DEMO_TOKEN before starting")
         commands = [
@@ -183,6 +184,7 @@ def supervise(root: Path, images: Path, port: int):
                 environment = dict(common)
                 if name != "runner":
                     environment.pop("DEEPSEEK_API_KEY", None)
+                    environment.pop("VULTR_SERVERLESS_INFERENCE_API_KEY", None)
                     environment["AI_AGENT_LLM_PROVIDER"] = "disabled"
                     environment["AI_AGENT_LLM_ALLOW_EXTERNAL"] = "false"
                 children.append(subprocess.Popen(command, env=environment))
@@ -190,10 +192,17 @@ def supervise(root: Path, images: Path, port: int):
             while True:
                 if stop_request.exists():
                     break
-                if any(child.poll() is not None for child in children):
-                    raise RuntimeError("A service exited; stopping the local stack")
-                if time.monotonic() - started > STALE_SECONDS and not readiness(root)["ready"]:
-                    raise RuntimeError("A service is stale; stopping the local stack")
+                exited = [(name, child.returncode) for (name, _), child in zip(commands, children)
+                          if child.poll() is not None]
+                if exited:
+                    name, code = exited[0]
+                    raise RuntimeError(f"Service {name} exited with code {code}; stopping the local stack")
+                if time.monotonic() - started > STALE_SECONDS:
+                    health = readiness(root)
+                    if not health["ready"]:
+                        stale = ", ".join(name for name, item in health["services"].items()
+                                          if not item["ready"])
+                        raise RuntimeError(f"Service heartbeat stale: {stale}; stopping the local stack")
                 time.sleep(1)
         except KeyboardInterrupt:
             pass
@@ -209,6 +218,7 @@ def supervise(root: Path, images: Path, port: int):
                     child.wait(timeout=5)
             environment = dict(common)
             environment.pop("DEEPSEEK_API_KEY", None)
+            environment.pop("VULTR_SERVERLESS_INFERENCE_API_KEY", None)
             environment["AI_AGENT_LLM_PROVIDER"] = "disabled"
             subprocess.run(commands[-1][1] + ["--recover-only"], env=environment, timeout=90, check=True)
             for service in SERVICES:

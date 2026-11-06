@@ -1,4 +1,4 @@
-"""版本化 CSV 契约。只定义配置，不在控制层导入或运行 CSV 解析器。"""
+"""Versioned CSV contract. Define configuration only; never import or run a CSV parser in the control plane."""
 
 from pydantic import BaseModel, ConfigDict
 
@@ -7,7 +7,7 @@ DATE_FORMATS = ("YYYY-MM-DD", "YYYY/MM/DD", "DD-MM-YYYY")
 
 
 class CsvPolicy(BaseModel):
-    """拒绝重复/空表头、畸形记录；空值仅指空字符串，不包含空格或 NA。"""
+    """Reject duplicate or empty headers and malformed records. Only an empty string is null; spaces and NA are not."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
     version: str = PARSER_VERSION
