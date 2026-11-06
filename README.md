@@ -1,5 +1,7 @@
 # AI Data Agent
 
+License: [MIT](LICENSE).
+
 沙箱优先的数据处理 Agent：本地固定检测、浏览器审批、DeepSeek 真正编写源码、新 Docker 容器执行、有限自愈、独立验证、原子发布和鉴权下载已实现。真实模型受控修复已通过；**Vultr 正式运行和生产开放验收仍后置**。仅用于受控单机非敏感演示。
 实施路径请参考 `AI_Data_Agent_详细设计与实施路线图_v2.md`。
 
