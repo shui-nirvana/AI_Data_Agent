@@ -133,7 +133,6 @@ async function refreshTask() {
     const task = await (await request(taskPath())).json();
     if (current !== taskId) return;
     showTask(task);
-    $("review-section").hidden = true;
     if (
       [
         "AWAITING_DECISIONS",
@@ -147,7 +146,12 @@ async function refreshTask() {
         "SUCCEEDED",
       ].includes(task.state)
     ) {
-      renderReview(await (await request(taskPath("/review"))).json());
+      if (task.state !== "AWAITING_DECISIONS") $("review-form").hidden = true;
+      const review = await (await request(taskPath("/review"))).json();
+      if (current !== taskId) return;
+      renderReview(review);
+    } else {
+      $("review-section").hidden = true;
     }
     if (eventTask !== taskId) {
       eventTask = taskId;
@@ -223,12 +227,27 @@ async function run(action) {
   }
 }
 
+async function withBusyButton(id, pendingText, action) {
+  const button = $(id);
+  if (button.disabled) return;
+  const originalText = button.textContent;
+  button.disabled = true;
+  button.textContent = pendingText;
+  try {
+    await action();
+  } finally {
+    button.disabled = false;
+    button.textContent = originalText;
+  }
+}
+
 $("file").addEventListener("change", () => {
   $("file-name").textContent = $("file").files[0]?.name || "No file selected";
 });
 
 $("upload-form").addEventListener("submit", (event) => {
   event.preventDefault();
+  if ($("upload").disabled) return;
   $("upload-error").textContent = "";
   for (const [id, message] of [
     ["token", "Enter the demo access token."],
@@ -241,7 +260,7 @@ $("upload-form").addEventListener("submit", (event) => {
       return;
     }
   }
-  run(async () => {
+  run(() => withBusyButton("upload", "Uploading...", async () => {
     const response = await request("/api/tasks", {
       method: "POST",
       headers: {
@@ -251,9 +270,10 @@ $("upload-form").addEventListener("submit", (event) => {
       body: $("file").files[0],
     });
     reviewVersion = null;
+    $("review-section").hidden = true;
     showTask(await response.json());
     await refreshTask();
-  });
+  }));
 });
 $("refresh").addEventListener("click", () => run(refreshTask));
 $("explain").addEventListener("click", () =>
@@ -272,17 +292,21 @@ $("explain").addEventListener("click", () =>
 );
 $("restore").addEventListener("click", () =>
   run(async () => {
-    taskId = $("restore-id").value.trim();
-    reviewVersion = null;
+    const requestedTask = $("restore-id").value.trim();
+    if (taskId !== requestedTask) {
+      taskId = requestedTask;
+      reviewVersion = null;
+      $("review-section").hidden = true;
+    }
     await refreshTask();
   }),
 );
 for (const action of ["start", "cancel"]) {
   $(action).addEventListener("click", () =>
-    run(async () => {
+    run(() => withBusyButton(action, action === "start" ? "Starting..." : "Cancelling...", async () => {
       await request(taskPath(`/${action}`), { method: "POST" });
       await refreshTask();
-    }),
+    })),
   );
 }
 $("review-form").addEventListener("submit", (event) => {
@@ -293,7 +317,7 @@ $("review-form").addEventListener("submit", (event) => {
     $("consent").focus();
     return;
   }
-  run(async () => {
+  run(() => withBusyButton("approve", "Submitting approval...", async () => {
     const decisions = cards.map((card) => {
       const action = card.select.value;
       const params =
@@ -321,18 +345,13 @@ $("review-form").addEventListener("submit", (event) => {
         params,
       };
     });
-    $("approve").disabled = true;
-    try {
-      await request(taskPath("/decisions"), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ task_version: reviewVersion, decisions }),
-      });
-      await refreshTask();
-    } finally {
-      $("approve").disabled = false;
-    }
-  });
+    await request(taskPath("/decisions"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ task_version: reviewVersion, decisions }),
+    });
+    await refreshTask();
+  }));
 });
 if (taskId) $("restore-id").value = taskId;
 setInterval(() => {

@@ -423,3 +423,98 @@ assert.equal(requests, 0);
 """
     result = subprocess.run([node, "-e", script], cwd=ROOT, capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
+
+
+def test_pending_buttons_and_review_refresh_do_not_interrupt_user():
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("Node is optional")
+    script = """
+const assert = require('node:assert/strict');
+const elements = new Map();
+const element = id => {
+  if (!elements.has(id)) elements.set(id, {
+    value: '', files: [], checked: false, disabled: false, textContent: '',
+    hidden: false, handlers: {},
+    addEventListener(name, fn) { this.handlers[name] = fn; },
+    replaceChildren() {}, append() {}, focus() {}
+  });
+  return elements.get(id);
+};
+global.document = {getElementById: element, hidden: false, createElement: () => element('generated')};
+global.location = {href: 'http://localhost/?task=task-1'};
+global.history = {replaceState() {}};
+global.window = {summarizeProgress: () => []};
+global.setInterval = () => {};
+element('token').value = 'test';
+element('start').textContent = 'Start fixed detection';
+let releaseStart, releaseReview, starts = 0, reviews = 0, uploads = 0, approvals = 0;
+const response = body => ({ok: true, json: async () => body});
+const task = {task_id: 'task-1', state: 'AWAITING_DECISIONS'};
+const review = {task_version: 1, spec_frozen: false, profile: {}, issues: []};
+global.fetch = async (path, options) => {
+  if (path.endsWith('/start')) {
+    starts++;
+    if (starts === 2) throw Error('network unavailable');
+    return new Promise(resolve => { releaseStart = () => resolve(response({})); });
+  }
+  if (path === '/api/tasks') {
+    uploads++;
+    return new Promise(() => {});
+  }
+  if (path.endsWith('/decisions')) {
+    approvals++;
+    return new Promise(() => {});
+  }
+  if (path.endsWith('/review')) {
+    reviews++;
+    if (reviews > 1) return new Promise(resolve => { releaseReview = () => resolve(response(review)); });
+    return response(review);
+  }
+  if (path.includes('/events')) return response({events: []});
+  if (path.endsWith('/evidence')) return response({artifacts: []});
+  return response(task);
+};
+const flush = () => new Promise(resolve => setImmediate(resolve));
+require('./web/app.js');
+(async () => {
+  element('start').handlers.click();
+  element('start').handlers.click();
+  assert.equal(starts, 1);
+  assert.equal(element('start').textContent, 'Starting...');
+  assert.equal(element('start').disabled, true);
+  releaseStart();
+  await flush();
+  assert.equal(element('start').disabled, false);
+  assert.equal(element('start').textContent, 'Start fixed detection');
+  assert.equal(element('review-section').hidden, false);
+  element('consent').checked = true;
+  element('refresh').handlers.click();
+  await flush();
+  assert.equal(reviews, 2);
+  assert.equal(element('review-section').hidden, false);
+  assert.equal(element('consent').checked, true);
+  releaseReview();
+  await flush();
+  assert.equal(element('review-section').hidden, false);
+  assert.equal(element('consent').checked, true);
+  element('start').handlers.click();
+  await flush();
+  assert.equal(element('start').disabled, false);
+  assert.equal(element('start').textContent, 'Start fixed detection');
+  assert.equal(element('status').textContent, 'network unavailable');
+  element('goal').value = 'test';
+  element('file').files = [{name: 'example.csv'}];
+  const event = {preventDefault() {}};
+  element('upload-form').handlers.submit(event);
+  element('upload-form').handlers.submit(event);
+  assert.equal(uploads, 1);
+  assert.equal(element('upload').textContent, 'Uploading...');
+  element('review-form').handlers.submit(event);
+  element('review-form').handlers.submit(event);
+  assert.equal(approvals, 1);
+  assert.equal(element('approve').textContent, 'Submitting approval...');
+})().catch(error => { process.stderr.write(String(error)); process.exitCode = 1; });
+"""
+    result = subprocess.run([node, "-e", script], cwd=ROOT, capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
