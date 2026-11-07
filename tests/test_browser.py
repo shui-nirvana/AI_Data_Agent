@@ -54,17 +54,17 @@ def test_upload_approve_publish_download_and_reload(tmp_path):
             page.locator("#token").fill("browser-test-only")
             page.locator("#goal").fill("Only normalize approved dates")
             page.locator("#file").set_input_files(source)
-            page.get_by_role("button", name="上传并登记").click()
+            page.get_by_role("button", name="Upload and register").click()
             playwright.expect(page.locator("#status")).to_contain_text("UPLOADED", timeout=10000)
-            page.get_by_role("button", name="启动固定检测").click()
+            page.get_by_role("button", name="Start fixed detection").click()
             playwright.expect(page.locator("#status")).to_contain_text("AWAITING_DECISIONS", timeout=30000)
-            page.get_by_role("combobox", name="date 清洗动作").select_option("normalize_date")
+            page.get_by_role("combobox", name="date cleaning action").select_option("normalize_date")
             page.locator("#consent").check()
-            page.get_by_role("button", name="提交并冻结审批").click()
+            page.get_by_role("button", name="Submit and freeze approval").click()
             playwright.expect(page.locator("#status")).to_contain_text("SUCCEEDED", timeout=300000)
             assert "llm_generate" in page.locator("#evidence").inner_text()
             with page.expect_download() as download:
-                page.get_by_role("button", name="下载 output").click()
+                page.get_by_role("button", name="Download output").click()
             result = download.value
             assert Path(result.path()).read_bytes().replace(b"\r\n", b"\n") == (
                 b"id,date,amount\n1,2026-10-31,-3\n2,2026/02/30,5\n3,,5\n")
@@ -72,7 +72,7 @@ def test_upload_approve_publish_download_and_reload(tmp_path):
             page.reload()
             assert page.locator("#token").input_value() == ""
             page.locator("#token").fill("browser-test-only")
-            page.get_by_role("button", name="加载任务").click()
+            page.get_by_role("button", name="Load task").click()
             playwright.expect(page.locator("#status")).to_contain_text("SUCCEEDED", timeout=10000)
             assert not errors
             browser.close()

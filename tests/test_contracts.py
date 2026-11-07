@@ -48,14 +48,14 @@ def test_jobs_require_frozen_and_hash_bound_references():
     digest = "a" * 64
     
     # C and D require a specification digest.
-    with pytest.raises(ValueError, match="冻结"):
+    with pytest.raises(ValueError, match="frozen"):
         JobRequest(task_id, attempt_id, Stage.CLEAN_C, digest)
         
     # D requires a candidate digest.
-    with pytest.raises(ValueError, match="候选"):
+    with pytest.raises(ValueError, match="candidate"):
         JobRequest(task_id, attempt_id, Stage.VERIFY_D, digest, spec_sha256=digest)
         
     # Verify SandboxManager fails explicitly without a runtime.
     request = JobRequest(task_id, attempt_id, Stage.PROFILE_A, digest)
-    with pytest.raises(NotImplementedError, match="容器运行时"):
+    with pytest.raises(NotImplementedError, match="container runtime"):
         SandboxManager().submit(request)

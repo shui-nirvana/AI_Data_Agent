@@ -53,13 +53,13 @@ class CodeGenerator(Protocol):
 class UnconfiguredGenerator:
     """Default generator that fails explicitly when not configured."""
     async def generate(self, spec_ref: str, profile_ref: str) -> CodeVersion:
-        raise NotImplementedError("尚未配置 LLM 提供者和隐私政策")
+        raise NotImplementedError("The LLM provider and privacy policy are not configured")
 
     async def repair(
         self, previous: CodeVersion, error_code: str, redacted_log: dict | str | None,
         executed_source: ExecutedSource,
     ) -> CodeVersion:
-        raise NotImplementedError("修复操作需要经过分类和脱敏的失败证据")
+        raise NotImplementedError("Repair requires classified and sanitized failure evidence")
 
 
 SYSTEM_PROMPT = """Write the COMPLETE Python CSV cleaning program for this one approved task.
@@ -193,14 +193,14 @@ class LLMCodeGenerator:
     def _path(self, ref: str) -> Path:
         path = Path(ref)
         if path.is_symlink() or not path.resolve().is_relative_to(self.root):
-            raise ValueError("生成引用不在私有任务目录")
+            raise ValueError("Generation reference is outside the private task directory")
         return path.resolve()
 
     def _context(self, spec_ref: str, profile_ref: str):
         spec = FrozenSpec.model_validate(read_json(self._path(spec_ref), 262144))
         profile = read_json(self._path(profile_ref))
         if profile.get("input_sha256") != spec.input_sha256 or profile.get("columns") != list(spec.columns):
-            raise ValueError("画像与规范不匹配")
+            raise ValueError("Profile does not match the specification")
         # Do not send column names, identities, goals, raw rows, examples, or actual fill literals; source loads the real specification at runtime.
         safe = {
             "context_version": "1.1",
@@ -235,15 +235,15 @@ class LLMCodeGenerator:
                      redacted_log: dict | str | None,
                      executed_source: ExecutedSource) -> CodeVersion:
         if error_code not in REPAIR_CODES:
-            raise ValueError("故障未获准修复")
+            raise ValueError("This failure is not eligible for repair")
         spec, safe, directory = self._context(executed_source.spec_ref, executed_source.profile_ref)
         if previous.spec_sha256 != spec.spec_sha256:
-            raise ValueError("修复必须使用相同冻结规范")
+            raise ValueError("Repair must use the same frozen specification")
         source = self._path(executed_source.source_ref)
         with source.open("rb") as stream:
             source_bytes = stream.read(32769)
         if len(source_bytes) > 32768 or hashlib.sha256(source_bytes).hexdigest() != executed_source.sha256:
-            raise ValueError("失败作业的执行源码哈希不匹配")
+            raise ValueError("Failed job's executed source hash does not match")
         source_text = source_bytes.decode("utf-8")
         # Use the same verified bytes for diagnostics and model input to prevent drift between reads.
         diagnostic = (verified_diagnostic(redacted_log, source_text)
@@ -271,7 +271,7 @@ class LLMCodeGenerator:
             body = {"task": safe}
             if previous:
                 if executed_source is None:
-                    raise ValueError("缺少已校验的执行源码")
+                    raise ValueError("Verified executed source is missing")
                 body["previous_source"] = executed_source
             if error_code or response_error:
                 body["implementation_error_code"] = error_code if previous else response_error
@@ -305,16 +305,16 @@ class LLMCodeGenerator:
                                  (request_id,)).fetchone()
                 if old:
                     if old[3] != prompt_hash:
-                        raise ValueError("保存的模型请求与当前输入不匹配")
+                        raise ValueError("Saved model request does not match the current input")
                     if old[0] == "completed":
                         version = CodeVersion(**json.loads(old[1]))
                         if file_hash(self._path(version.source_ref), 32768) != version.code_sha256:
-                            raise ValueError("保存的源码已改变")
+                            raise ValueError("Saved source has changed")
                         return version
                     if old[0] == "invalid":
                         response_error = old[2]
                         continue
-                    raise ModelUnavailableError("MODEL_CALL_UNCERTAIN_OR_FAILED：不重复外部调用")
+                    raise ModelUnavailableError("MODEL_CALL_UNCERTAIN_OR_FAILED: external calls are not repeated")
                 if db.execute("SELECT count(*) FROM calls").fetchone()[0] >= 3:
                     raise ModelUnavailableError("MODEL_CALL_BUDGET_EXHAUSTED")
                 db.execute("INSERT INTO calls VALUES(?, 'started', NULL, ?, NULL)",

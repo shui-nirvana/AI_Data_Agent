@@ -37,7 +37,7 @@ def create_app(
     # Reject missing or unsafe demo token configuration.
     token = demo_token or os.environ.get("AI_AGENT_DEMO_TOKEN")
     if not token or token == "replace-with-a-long-random-secret":
-        raise RuntimeError("在启动控制平面之前，请设置 AI_AGENT_DEMO_TOKEN 环境变量")
+        raise RuntimeError("Set the AI_AGENT_DEMO_TOKEN environment variable before starting the control plane")
 
     # Configure the data root.
     root = data_dir or Path(os.environ.get("AI_AGENT_DATA_DIR", ".runtime"))
@@ -45,7 +45,7 @@ def create_app(
     # Resolve the upload limit.
     limit = max_upload_bytes or int(os.environ.get("AI_AGENT_MAX_UPLOAD_BYTES", "10485760"))
     if limit <= 0:
-        raise ValueError("上传限制必须为正数")
+        raise ValueError("The upload limit must be positive")
 
     # Create storage directories with restricted Unix permissions.
     root.mkdir(parents=True, exist_ok=True)
@@ -97,7 +97,7 @@ def create_app(
     def ready(x_demo_token: str | None = Header(None)):
         import hmac
         if x_demo_token is None or not hmac.compare_digest(token, x_demo_token):
-            raise HTTPException(401, "无效的演示令牌")
+            raise HTTPException(401, "Invalid demo token")
         result = readiness(root)
         return JSONResponse(result, status_code=200 if result["ready"] else 503)
 

@@ -44,7 +44,7 @@ def test_only_allowlisted_facts_reach_model():
     sent = model.calls[0].model_dump_json()
     assert all(secret not in sent for secret in ("private-column", "private-value", "private-hash", "private-task-id"))
     assert facts["changed_cells"] == 20000 and facts["mismatch_count"] == 0
-    assert "实际变更 20000 格，不匹配 0 格" in result["text"]
+    assert "20000 changed cells, 0 mismatches" in result["text"]
     assert result["provider"] == "fake" and result["input_tokens"] == 15
     assert len(model.calls) == 1 and model.calls[0].max_output_tokens == 512
 
@@ -57,8 +57,8 @@ def test_structural_rejection_does_not_claim_zero_cell_mismatches():
     facts = validation_facts(value)
     assert "changed_cells" not in facts and "mismatch_count" not in facts
     text = render_explanation(facts, json.dumps(model_choices(facts)))
-    assert "未通过" in text and "未进行逐格比较" in text
-    assert "不匹配 0 格" not in text
+    assert "failed" in text and "cells were not compared" in text
+    assert "0 mismatches" not in text
 
 
 def test_cell_rejection_preserves_nonzero_d_counts():
@@ -68,8 +68,8 @@ def test_cell_rejection_preserves_nonzero_d_counts():
     value["mismatch_count"] = 3
     facts = validation_facts(value)
     text = render_explanation(facts, json.dumps(model_choices(facts)))
-    assert "D 独立验证结论：未通过" in text
-    assert "实际变更 20000 格，不匹配 3 格" in text
+    assert "Independent validation D: failed" in text
+    assert "20000 changed cells, 3 mismatches" in text
 
 
 @pytest.mark.parametrize("style", ["plain", "brief"])
@@ -85,19 +85,50 @@ def test_byte_condition_is_explained_without_guessing_from_change_count(style, p
     choices = model_choices(facts)
     choices["items"][3]["style"] = style
     text = render_explanation(facts, json.dumps(choices))
-    assert "仅全保留时要求输入与输出的完整字节相同" in text
-    assert "批准修改时不要求字节相同" in text
-    assert f"输出字节一致性条件：{'通过' if passed else '未通过'}" in text
-    assert "本次全部保留" not in text and "本次批准了修改" not in text
+    assert "only when all columns are preserved" in text
+    assert "approved changes do not require identical bytes" in text
+    assert f"Output byte consistency condition: {'passed' if passed else 'failed'}" in text
+    assert "All columns were preserved" not in text and "Changes were approved" not in text
 
 
 @pytest.mark.parametrize("old", ["全保留时的输出字节一致性要求", "全保留字节检查"])
 @pytest.mark.parametrize("passed", ["通过", "未通过"])
 def test_legacy_wording_is_corrected_without_model_call(old, passed):
     old_text = f"{old}：{passed}。"
-    assert "仅全保留时要求" in clarify_byte_check(old_text)
-    assert "本次全部保留" in clarify_byte_check(old_text, True)
-    assert "本次批准了修改" in clarify_byte_check(old_text, False)
+    assert "only when all columns are preserved" in clarify_byte_check(old_text)
+    assert "All columns were preserved" in clarify_byte_check(old_text, True)
+    assert "Changes were approved" in clarify_byte_check(old_text, False)
+
+
+def test_complete_legacy_explanation_is_english_without_changing_facts():
+    old_text = "\n".join([
+        "D 独立验证结论：未通过。",
+        "逐格比较：实际变更 1 格，不匹配 3 格。",
+        "D 报告提供的是变更总数，不包含各列变更数量。",
+        "输入文件与批准时记录的文件指纹一致：通过。",
+        "列结构一致：通过。",
+        "输出行数与输入一致：通过。",
+        "输出字节一致性条件：通过。仅全保留时要求输入与输出的完整字节相同；批准修改时不要求字节相同。",
+        "每格内容及行位置符合批准规则：未通过。",
+        "验证只针对批准规则及报告中的检查，不代表发现或修复了数据中的所有问题。",
+    ])
+    text = clarify_byte_check(old_text, False)
+    assert "Independent validation D: failed." in text
+    assert "1 changed cell, 3 mismatches." in text
+    assert "Cells and row positions" not in text
+    assert "Every cell and row position follows the approved rules: failed." in text
+    assert "Changes were approved" in text
+    assert all(ord(character) < 128 for character in text)
+
+
+def test_legacy_structural_failure_does_not_infer_cell_counts():
+    text = clarify_byte_check(
+        "D 独立验证结论：未通过。\n"
+        "结构检查未全部通过，未进行逐格比较，不能据此判断变更或不匹配数量。"
+    )
+    assert "cells were not compared" in text
+    assert "0 mismatches" not in text
+    assert all(ord(character) < 128 for character in text)
 
 
 @pytest.mark.parametrize("mutation", [

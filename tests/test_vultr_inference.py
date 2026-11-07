@@ -166,7 +166,7 @@ def test_bootstrap_vultr_requires_consent_and_does_not_fallback(tmp_path, monkey
     settings = IntegrationSettings(llm_provider="vultr", llm_model="example-model")
     monkeypatch.setenv(KEY_NAME, "test-key")
     monkeypatch.delenv("AI_AGENT_LLM_ALLOW_EXTERNAL", raising=False)
-    with pytest.raises(ValueError, match="授权"):
+    with pytest.raises(ValueError, match="authorize"):
         build_generator(tmp_path, settings)
     monkeypatch.setenv("AI_AGENT_LLM_ALLOW_EXTERNAL", "true")
     generator = build_generator(tmp_path, settings)

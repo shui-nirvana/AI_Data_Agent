@@ -41,35 +41,35 @@ def bundle_sources(root: Path, target: Path, manifest: dict) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="构建通用 Linux 作业镜像与开发部署包")
+    parser = argparse.ArgumentParser(description="Build the Linux job image and development deployment bundle")
     parser.add_argument("--target", choices=("local", "vultr", "aws"), default="local")
     parser.add_argument("--platform", choices=("linux/amd64", "linux/arm64"),
-                        default="linux/amd64", help="必须与目标 VM 的 CPU 架构一致")
+                        default="linux/amd64", help="Must match the target VM CPU architecture")
     parser.add_argument("--output", type=Path, default=Path(".runtime/docker"))
-    parser.add_argument("--export", action="store_true", help="导出镜像 tar 和白名单源码 zip")
+    parser.add_argument("--export", action="store_true", help="Export the image tar and allowlisted source zip")
     parser.add_argument("--base", default="python@sha256:aa943ce411423c7582288f18707ff66eddcbaeb510502d747a72aeb34f30d159",
                         help="Trusted Python base image pinned by digest")
     args = parser.parse_args()
     import docker
     client = docker.from_env(timeout=120)
     if client.info().get("OSType") != "linux":
-        raise SystemExit("需要 Linux Docker 引擎")
+        raise SystemExit("A Linux Docker engine is required")
     root = Path(__file__).resolve().parents[2]
     # Networking is allowed for builds; execution uses local image IDs and never pulls images or dependencies.
     import re
     if not re.fullmatch(r"[a-zA-Z0-9./_-]+@sha256:[0-9a-f]{64}", args.base):
-        raise SystemExit("基础镜像必须使用不可变摘要")
+        raise SystemExit("The base image must use an immutable digest")
     base = client.images.pull(args.base, platform=args.platform)
     digests = base.attrs.get("RepoDigests", [])
     if not digests:
-        raise SystemExit("未获取基础镜像摘要")
+        raise SystemExit("Could not obtain the base image digest")
     image, _ = client.images.build(
         path=str(root), dockerfile="deploy/Dockerfile.job",
         buildargs={"PYTHON_BASE": digests[0]}, tag="ai-data-agent-job:dev",
         rm=True, pull=False, platform=args.platform,
     )
     if image.attrs.get("Architecture") != args.platform.split("/")[1]:
-        raise SystemExit("构建镜像 CPU 架构与目标不匹配")
+        raise SystemExit("The built image CPU architecture does not match the target")
     manifest = {
         "schema_version": "1.0", "deployment_platform": args.target,
         "execution_backend": "docker", "base_digest": digests[0],
@@ -85,7 +85,7 @@ def main() -> None:
             for chunk in image.save(named=False):
                 output.write(chunk)
         bundle_sources(root, args.output / "application.zip", manifest)
-    print(f"镜像/部署配置已写入 {args.output}；目标平台尚未验收。")
+    print(f"Image/deployment configuration written to {args.output}; the target platform has not been accepted.")
 
 
 if __name__ == "__main__":

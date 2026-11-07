@@ -39,7 +39,7 @@ class GraphState(TypedDict, total=False):
 def build_graph(checkpointer: object, store: WorkflowStore, generator=None):
     """Deduplicate node side effects with database stage uniqueness; resume values are wake-up signals only."""
     if checkpointer is None:
-        raise ValueError("需要持久化的 LangGraph 检查点管理器")
+        raise ValueError("A persistent LangGraph checkpointer is required")
         
     from langgraph.graph import END, START, StateGraph
     from langgraph.types import interrupt
@@ -49,7 +49,7 @@ def build_graph(checkpointer: object, store: WorkflowStore, generator=None):
     def private(path: str) -> Path:
         resolved = Path(path).resolve()
         if not resolved.is_relative_to(store.root):
-            raise ValueError("引用不在私有任务目录")
+            raise ValueError("Reference is outside the private task directory")
         return resolved
 
     def materialize(task_id: str, name: str, content: str) -> str:
@@ -74,7 +74,7 @@ def build_graph(checkpointer: object, store: WorkflowStore, generator=None):
 
     def successful_result(stored):
         if stored["state"] != "finished" or not stored["result_dir"]:
-            raise ValueError("隔离作业未成功")
+            raise ValueError("Isolated job did not succeed")
         return private(stored["result_dir"])
 
     def profile(state: GraphState):
@@ -102,7 +102,7 @@ def build_graph(checkpointer: object, store: WorkflowStore, generator=None):
             flow = store.flow(task_id)
         store.check_active(task_id)
         if not flow["spec_json"]:
-            raise ValueError("尚未提交冻结审批")
+            raise ValueError("Frozen approval has not been submitted")
         spec = FrozenSpec.model_validate_json(flow["spec_json"])
         return {"spec_ref": materialize(task_id, "spec.json", flow["spec_json"]),
                 "spec_sha256": spec.spec_sha256}
@@ -121,7 +121,7 @@ def build_graph(checkpointer: object, store: WorkflowStore, generator=None):
             code = asdict(version)
             if (code["spec_sha256"] != state["spec_sha256"]
                     or file_hash(private(code["source_ref"]), 262144) != code["code_sha256"]):
-                raise ValueError("代码版本与冻结规范或哈希不匹配")
+                raise ValueError("Code version does not match the frozen specification or hash")
             store.save_code(task_id, code)
         return code_state(code, 1)
 
@@ -152,7 +152,7 @@ def build_graph(checkpointer: object, store: WorkflowStore, generator=None):
                         ("runtime_error" if error == "RUNTIME_ERROR" else "completed"))
             if eligible and state.get("attempt_no", 1) < 3:
                 return {"repair_error": error, "attempt_id": stored["job_id"]}
-            raise ValueError("C 故障禁止自动修复或尝试预算耗尽")
+            raise ValueError("Stage C failure is not eligible for automatic repair or the attempt budget is exhausted")
         result = successful_result(stored)
         candidate = result / "cleaned.csv"
         return {"candidate_ref": str(candidate), "candidate_sha256": file_hash(candidate, 12_000_000),
@@ -162,12 +162,12 @@ def build_graph(checkpointer: object, store: WorkflowStore, generator=None):
         store.check_active(state["task_id"])
         attempt_no = state.get("attempt_no", 1) + 1
         if attempt_no > 3 or state["repair_error"] not in ("RUNTIME_ERROR", "MISSING_OUTPUT"):
-            raise ValueError("修复未获准")
+            raise ValueError("Repair is not authorized")
         code = store.code(state["task_id"], attempt_no)
         if code is None:
             previous = store.code(state["task_id"], attempt_no - 1)
             if previous is None:
-                raise ValueError("缺少失败作业的执行源码记录")
+                raise ValueError("Failed job's executed source record is missing")
             job = store.job(state["attempt_id"])
             evidence = json.loads(job["evidence_json"]) if job and job["evidence_json"] else {}
             request = json.loads(job["request_json"]) if job else {}
@@ -180,17 +180,17 @@ def build_graph(checkpointer: object, store: WorkflowStore, generator=None):
                     or evidence.get("code_sha256") != request.get("code_sha256")
                     or evidence.get("spec_sha256") != state["spec_sha256"]
                     or evidence.get("input_sha256") != state["input_sha256"]):
-                raise ValueError("修复证据与源码尝试不匹配")
+                raise ValueError("Repair evidence does not match the source attempt")
             ref = evidence.get("executed_source_ref")
             digest = evidence.get("executed_source_sha256")
             if not isinstance(ref, str) or not isinstance(digest, str):
-                raise ValueError("缺少失败作业的执行源码快照")
+                raise ValueError("Failed job's executed source snapshot is missing")
             expected = store.root / "worker_jobs" / state["attempt_id"] / "input" / "clean.py"
             if Path(ref) != expected or Path(ref).is_symlink():
-                raise ValueError("执行源码快照归属不匹配")
+                raise ValueError("Executed source snapshot does not match the job")
             source = private(ref)
             if file_hash(source, 32768) != digest:
-                raise ValueError("执行源码快照哈希不匹配")
+                raise ValueError("Executed source snapshot hash does not match")
             executed_source = ExecutedSource(str(source), digest, state["spec_ref"], state["profile_ref"])
             diagnostic = evidence.get("runtime_diagnostic") if state["repair_error"] == "RUNTIME_ERROR" else None
             store.repairing(state["task_id"])
@@ -199,7 +199,7 @@ def build_graph(checkpointer: object, store: WorkflowStore, generator=None):
             ))
             code = asdict(version)
             if code["spec_sha256"] != state["spec_sha256"] or code["code_sha256"] == digest:
-                raise ValueError("修复必须产生同规范的新源码")
+                raise ValueError("Repair must produce new source for the same specification")
             store.save_code(state["task_id"], code, attempt_no)
         return code_state(code, attempt_no)
 
@@ -227,7 +227,7 @@ def build_graph(checkpointer: object, store: WorkflowStore, generator=None):
                 or {c.get("id") for c in report["checks"]} != expected_checks
                 or any(c.get("passed") is not True for c in report["checks"])
                 or file_hash(candidate, 12_000_000) != candidate_digest):
-            raise ValueError("D 证据或候选哈希不合约")
+            raise ValueError("Stage D evidence or candidate hash violates the contract")
         store.validated(task_id, report)
         return {"candidate_ref": str(candidate), "candidate_sha256": candidate_digest,
                 "validation_ref": str(result / "validation.json")}

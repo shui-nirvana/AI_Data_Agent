@@ -209,7 +209,7 @@ def test_sandbox_failure_and_bad_profile_are_not_zero_issues(setup):
     profile["status"] = "completed"
     validate_profile(profile, issues, profile["input_sha256"])
     profile["tool_runs"].pop()
-    with pytest.raises(ValueError, match="工具"):
+    with pytest.raises(ValueError, match="tools"):
         validate_profile(profile, issues, profile["input_sha256"])
 
 
@@ -365,7 +365,7 @@ def test_profile_omitted_findings_are_rejected(setup):
     root, _, task_id = setup
     profile, issues = scan(root / "inputs" / f"{task_id}.csv")
     profile["status"] = "completed"
-    with pytest.raises(ValueError, match="不完整"):
+    with pytest.raises(ValueError, match="incomplete"):
         validate_profile(profile, issues[:-1], profile["input_sha256"])
 
 
@@ -412,9 +412,9 @@ def test_on_demand_explanation_is_private_idempotent_and_separate_from_d(setup):
     assert runner.run_once()
     result = api.get(url, headers=HEADERS).json()
     assert result["status"] == "completed"
-    assert "D 独立验证结论：通过" in result["result"]["text"]
-    assert "实际变更 0 格，不匹配 0 格" in result["result"]["text"]
-    assert "本次全部保留，要求输入与输出的完整字节相同" in result["result"]["text"]
+    assert "Independent validation D: passed" in result["result"]["text"]
+    assert "0 changed cells, 0 mismatches" in result["result"]["text"]
+    assert "All columns were preserved; the complete input and output bytes must match" in result["result"]["text"]
     assert result["result"]["input_tokens"] == 20
     assert len(model.calls) == 1
     sent = model.calls[0].messages[-1].content
@@ -458,8 +458,8 @@ def test_byte_check_uses_approved_rules_not_change_count(setup, change_cells):
     assert api.post(url, headers=HEADERS).status_code == 202
     assert GraphRunner(root, explainer=ValidationExplainer(ModelGateway(model))).run_once()
     result = api.get(url, headers=HEADERS).json()["result"]["text"]
-    assert "本次批准了修改，不要求输入与输出的完整字节相同" in result
-    assert f"实际变更 {1 if change_cells else 0} 格" in result
+    assert "Changes were approved; the complete input and output bytes need not match" in result
+    assert ("1 changed cell," if change_cells else "0 changed cells,") in result
     assert "all_preserved" not in model.calls[0].messages[-1].content
 
 
@@ -474,15 +474,20 @@ def test_existing_explanation_is_corrected_and_unbound_spec_does_not_guess(setup
     with store.db() as db:
         row = db.execute("SELECT result_json FROM validation_explanations WHERE task_id=?", (task_id,)).fetchone()
         result = json.loads(row["result_json"])
-        result["text"] = "全保留字节检查：通过。"
+        result["text"] = ("D 独立验证结论：通过。\n逐格比较：实际变更 0 格，不匹配 0 格。\n"
+                          "全保留字节检查：通过。")
         db.execute("UPDATE validation_explanations SET result_json=? WHERE task_id=?",
                    (json.dumps(result), task_id))
-    assert "本次全部保留" in api.get(url, headers=HEADERS).json()["result"]["text"]
+    text = api.get(url, headers=HEADERS).json()["result"]["text"]
+    assert "Independent validation D: passed." in text
+    assert "0 changed cells, 0 mismatches." in text
+    assert "All columns were preserved" in text
+    assert all(ord(character) < 128 for character in text)
     with store.db() as db:
         db.execute("UPDATE workflows SET spec_json=? WHERE task_id=?", ("{}", task_id))
     text = api.get(url, headers=HEADERS).json()["result"]["text"]
-    assert "仅全保留时要求" in text
-    assert "本次全部保留" not in text and "本次批准了修改" not in text
+    assert "only when all columns are preserved" in text
+    assert "All columns were preserved" not in text and "Changes were approved" not in text
     assert len(model.calls) == 1
 
 
@@ -598,11 +603,11 @@ def test_explanation_never_overrides_rejected_d(setup, structural):
     assert api.post(url, headers=HEADERS).status_code == 202
     assert GraphRunner(root, explainer=ValidationExplainer(ModelGateway(model))).run_once()
     text = api.get(url, headers=HEADERS).json()["result"]["text"]
-    assert "D 独立验证结论：未通过" in text
+    assert "Independent validation D: failed" in text
     if structural:
-        assert "未进行逐格比较" in text and "不匹配 0 格" not in text
+        assert "cells were not compared" in text and "0 mismatches" not in text
         assert "mismatch_count" not in model.calls[0].messages[-1].content
     else:
-        assert "不匹配 1 格" in text
+        assert "1 mismatch." in text
     assert store.task(task_id)["state"] == "FAILED"
     assert api.get(f"/api/tasks/{task_id}/artifacts/output", headers=HEADERS).status_code == 409

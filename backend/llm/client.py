@@ -54,7 +54,7 @@ class ModelUnavailableError(RuntimeError):
 
 class DisabledModelClient:
     async def complete(self, request: ModelRequest) -> ModelResponse:
-        raise ModelUnavailableError("尚未配置并授权具体模型适配器")
+        raise ModelUnavailableError("No model adapter has been configured and authorized")
 
 
 class ModelGateway:
@@ -68,9 +68,9 @@ class ModelGateway:
         # Revalidate to reject adapter objects that bypassed constructor validation.
         response = ModelResponse.model_validate(response.model_dump())
         if response.request_id != request.request_id:
-            raise ValueError("模型响应与请求不匹配")
+            raise ValueError("Model response does not match the request")
         if response.finish_reason != "completed":
-            raise ModelUnavailableError("模型未返回完整输出，禁止进入清洗执行",
+            raise ModelUnavailableError("Model output is incomplete; cleaning execution is blocked",
                                         safe_code=("MODEL_OUTPUT_LENGTH" if response.finish_reason == "length"
                                                    else "MODEL_OUTPUT_REFUSED"),
                                         input_tokens=response.input_tokens, output_tokens=response.output_tokens)

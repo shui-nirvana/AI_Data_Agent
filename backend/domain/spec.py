@@ -50,22 +50,22 @@ class Decision(ImmutableModel):
     def valid_action(self):
         if self.action == Action.NORMALIZE_DATE:
             if self.predicate_id != "parseable_nonstandard_date":
-                raise ValueError("日期动作必须使用已登记谓词")
+                raise ValueError("The date action must use the registered predicate")
             formats = self.params.input_formats
             if not formats or len(set(formats)) != len(formats) or any(
                 item not in DATE_FORMATS for item in formats
             ) or self.params.literal is not None:
-                raise ValueError("日期输入格式必须明确、唯一且属于白名单")
+                raise ValueError("Date input formats must be specified, unique, and allowed")
         elif self.action == Action.FILL_NULL_WITH_LITERAL:
             if self.predicate_id != "empty_string" or self.params.literal is None:
-                raise ValueError("空值动作必须使用空字符串谓词及明确字面值")
+                raise ValueError("The fill action requires the empty-string predicate and a literal value")
             if self.params.input_formats:
-                raise ValueError("空值动作不能携带日期参数")
+                raise ValueError("The fill action cannot include date parameters")
             if self.params.literal.startswith(("=", "+", "-", "@")):
-                raise ValueError("MVP 不新增可能触发电子表格公式的填充值")
+                raise ValueError("Fill values that could trigger spreadsheet formulas are not allowed")
         else:
             if self.predicate_id != "all_cells" or self.params != ActionParams():
-                raise ValueError("保留动作只支持整列保护，不接受转换参数")
+                raise ValueError("The preserve action protects the entire column and accepts no conversion parameters")
         return self
 
 
@@ -87,22 +87,22 @@ class FrozenSpec(ImmutableModel):
         if not self.columns or len(set(self.columns)) != len(self.columns) or any(
             not column.strip() for column in self.columns
         ):
-            raise ValueError("列必须非空且唯一")
+            raise ValueError("Column names must be nonempty and unique")
         ids, columns = set(), set()
         for decision in self.decisions:
             if decision.issue_id in ids or decision.column in columns:
-                raise ValueError("重复问题或同列动作冲突")
+                raise ValueError("Duplicate issue or conflicting actions for the same column")
             ids.add(decision.issue_id)
             columns.add(decision.column)
             if decision.column not in self.columns:
-                raise ValueError("决策引用未知列")
+                raise ValueError("Decision references an unknown column")
             if decision.actor_id != self.owner_id or decision.task_version != self.task_version:
-                raise ValueError("审批身份或任务版本不匹配")
+                raise ValueError("Approval identity or task version does not match")
         written = {d.column for d in self.decisions if d.action != Action.PRESERVE}
         if written == set(self.columns):
-            raise ValueError("MVP 必须至少保留一个未修改列以核对行对应关系")
+            raise ValueError("At least one unchanged column must be preserved to check row correspondence")
         if self.spec_sha256 != specification_hash(self.model_dump(mode="json")):
-            raise ValueError("规范哈希不匹配")
+            raise ValueError("Specification hash does not match")
         return self
 
 
@@ -125,14 +125,14 @@ def freeze_spec(
     """
     by_id = {issue["issue_id"]: issue for issue in issues}
     if len(by_id) != len(issues) or {d.issue_id for d in decisions} != set(by_id):
-        raise ValueError("必须完整裁决本任务全部问题，且问题 ID 唯一")
+        raise ValueError("All task issues must be decided and issue IDs must be unique")
     for decision in decisions:
         issue = by_id[decision.issue_id]
         if (issue.get("source") != "fixed" or issue.get("column") != decision.column
                 or issue.get("input_sha256") != input_sha256):
-            raise ValueError("发现来源、输入哈希或目标列不匹配")
+            raise ValueError("Finding source, input hash, or target column does not match")
         if decision.action.value not in issue.get("actions", ["preserve"]):
-            raise ValueError("该发现不支持所选动作")
+            raise ValueError("The finding does not support the selected action")
     payload = {
         "schema_version": "1.0", "parser_version": PARSER_VERSION,
         "task_id": str(UUID(task_id)), "input_sha256": input_sha256,

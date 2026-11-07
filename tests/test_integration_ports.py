@@ -67,7 +67,7 @@ def test_platform_does_not_enable_execution(tmp_path, platform):
         assert api.get("/health").json()["execution_enabled"] is False
         assert api.app.state.dependencies.settings.deployment_platform == platform
     job = JobRequest(str(uuid4()), str(uuid4()), Stage.PROFILE_A, "a" * 64)
-    with pytest.raises(NotImplementedError, match="容器运行时"):
+    with pytest.raises(NotImplementedError, match="container runtime"):
         services.execution.submit(job, LIMITS[job.stage])
 
 
@@ -89,14 +89,14 @@ def test_partial_model_output_never_counts_as_completed(finish_reason):
             return ModelResponse(request_id=request.request_id, provider="test", model="test",
                                  text="partial", finish_reason=finish_reason)
     request = ModelRequest(request_id="test", messages=(Message(role="user", content="test"),))
-    with pytest.raises(ModelUnavailableError, match="完整"):
+    with pytest.raises(ModelUnavailableError, match="incomplete"):
         asyncio.run(ModelGateway(PartialModel()).complete(request))
 
 
 def test_unknown_configured_adapters_fail_closed():
-    with pytest.raises(ValueError, match="执行适配器"):
+    with pytest.raises(ValueError, match="execution adapter"):
         build_dependencies(IntegrationSettings(execution_backend="not-implemented"))
-    with pytest.raises(ValueError, match="模型适配器"):
+    with pytest.raises(ValueError, match="model adapter"):
         build_dependencies(IntegrationSettings(llm_provider="not-implemented"))
 
 
@@ -104,7 +104,7 @@ def test_wrong_job_receipt_is_rejected():
     class WrongExecutor(MemoryExecutor):
         def submit(self, job, limits):
             return ExecutionReceipt(str(uuid4()), job.attempt_id, "wrong")
-    with pytest.raises(ValueError, match="不匹配"):
+    with pytest.raises(ValueError, match="does not match"):
         SandboxManager(WrongExecutor("test")).submit(
             JobRequest(str(uuid4()), str(uuid4()), Stage.PROFILE_A, "a" * 64)
         )

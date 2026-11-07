@@ -25,7 +25,7 @@ def test_python_version_accepts_minimum_and_newer(version):
 
 
 def test_python_version_rejects_old_interpreter():
-    with pytest.raises(launcher.LaunchError, match=r"Python 3\.10.*最低要求 3\.11.*更新"):
+    with pytest.raises(launcher.LaunchError, match=r"Python 3\.10.*minimum version 3\.11.*upgrade"):
         launcher.check_python_version((3, 10))
 
 
@@ -46,7 +46,7 @@ def test_virtualenv_version_is_checked_and_recorded(tmp_path, monkeypatch, capsy
     monkeypatch.setattr(launcher, "run", fake_run)
     launcher.prepare_dependencies({})
     assert json.loads(marker.read_text()) == {"fingerprint": "test-fingerprint", "python": version}
-    assert ("兼容性尚未验证" in capsys.readouterr().out) == (version != "3.12")
+    assert ("compatibility with this version is unverified" in capsys.readouterr().out) == (version != "3.12")
     launcher.prepare_dependencies({})
     assert sum("install" in command for command in commands) == 2
 
@@ -62,7 +62,7 @@ def test_old_virtualenv_is_rejected_without_install(tmp_path, monkeypatch):
         return "3.10"
 
     monkeypatch.setattr(launcher, "run", fake_run)
-    with pytest.raises(launcher.LaunchError, match=r"\.venv.*3\.10.*最低要求 3\.11"):
+    with pytest.raises(launcher.LaunchError, match=r"\.venv.*3\.10.*minimum 3\.11"):
         launcher.prepare_dependencies({})
     assert len(calls) == 1
 
@@ -78,7 +78,7 @@ def test_preserve_mode_never_passes_model_key(monkeypatch):
 
 def test_real_model_needs_explicit_permission(monkeypatch):
     env = {"DEEPSEEK_API_KEY": "private-test-key"}
-    with pytest.raises(launcher.LaunchError, match="明确同意"):
+    with pytest.raises(launcher.LaunchError, match="explicit consent"):
         launcher.choose_model("deepseek", False, env)
     assert env == {"DEEPSEEK_API_KEY": "private-test-key"}
     calls = []
@@ -91,10 +91,10 @@ def test_real_model_needs_explicit_permission(monkeypatch):
 
 def test_vultr_launcher_requires_consent_and_model(monkeypatch):
     env = {"VULTR_SERVERLESS_INFERENCE_API_KEY": "private-vultr-key"}
-    with pytest.raises(launcher.LaunchError, match="明确同意"):
+    with pytest.raises(launcher.LaunchError, match="explicit consent"):
         launcher.choose_model("vultr", False, env)
     monkeypatch.setattr(launcher.sys.stdin, "isatty", lambda: False)
-    with pytest.raises(launcher.LaunchError, match="模型 ID"):
+    with pytest.raises(launcher.LaunchError, match="model ID"):
         launcher.choose_model("vultr", True, env)
     calls = []
     monkeypatch.setattr(launcher, "run", lambda *args, **kwargs: calls.append((args, kwargs)))
@@ -159,7 +159,7 @@ def test_image_cache_requires_matching_sources_manifest_and_local_images(tmp_pat
     assert not launcher.image_is_current("changed", "linux/amd64", {})
     assert not launcher.image_is_current("abc", "linux/arm64", {})
     monkeypatch.setattr(launcher, "run", lambda *args, **kwargs: (_ for _ in ()).throw(
-        launcher.LaunchError("镜像", "not found")))
+        launcher.LaunchError("Images", "not found")))
     assert not launcher.image_is_current("abc", "linux/amd64", {})
 
 
@@ -208,14 +208,14 @@ def test_status_checks_http_and_heartbeats_without_token(tmp_path, monkeypatch, 
             heartbeat(tmp_path, name)
         launcher.show_status(tmp_path, server.server_port)
         output = capsys.readouterr().out
-        assert "API 可访问，三项最近心跳有效" in output
-        assert "不证明进程实时存活" in output
+        assert "API is reachable and all three recent heartbeats are valid" in output
+        assert "does not prove" in output
         assert "private-demo-token" not in output
         assert received == [("/health", None)]
         (tmp_path / "services" / "runner.json").unlink()
-        with pytest.raises(launcher.LaunchError, match="尚未全部就绪"):
+        with pytest.raises(launcher.LaunchError, match="not all ready"):
             launcher.show_status(tmp_path, server.server_port)
-        assert "runner] 最近心跳缺失或过期" in capsys.readouterr().out
+        assert "runner] Latest heartbeat missing or expired" in capsys.readouterr().out
     finally:
         server.shutdown()
         server.server_close()
@@ -234,9 +234,9 @@ def test_status_reports_api_unavailable(tmp_path, monkeypatch, capsys):
             raise OSError("connection refused")
 
     monkeypatch.setattr(launcher, "build_opener", lambda *_: FailingOpener())
-    with pytest.raises(launcher.LaunchError, match="尚未全部就绪"):
+    with pytest.raises(launcher.LaunchError, match="not all ready"):
         launcher.show_status(tmp_path, 8000)
-    assert "不可用或返回异常" in capsys.readouterr().out
+    assert "unavailable or invalid" in capsys.readouterr().out
 
 
 def test_stop_waits_for_recovery_before_success(tmp_path, monkeypatch):
@@ -255,7 +255,7 @@ def test_stop_waits_for_recovery_before_success(tmp_path, monkeypatch):
     monkeypatch.setattr(launcher.time, "sleep", complete_stop)
     launcher.request_stop(tmp_path, timeout=1)
     assert not (tmp_path / "stop.request").exists()
-    with pytest.raises(launcher.LaunchError, match="未发现"):
+    with pytest.raises(launcher.LaunchError, match="No service heartbeat"):
         launcher.request_stop(tmp_path, timeout=1)
 
 
@@ -263,7 +263,7 @@ def test_stop_timeout_does_not_delete_request_or_claim_success(tmp_path):
     services = tmp_path / "services"
     services.mkdir()
     (services / "worker.json").write_text("{}")
-    with pytest.raises(launcher.LaunchError, match="未确认"):
+    with pytest.raises(launcher.LaunchError, match="unconfirmed"):
         launcher.request_stop(tmp_path, timeout=0)
     assert (tmp_path / "stop.request").exists()
 
@@ -354,24 +354,72 @@ const { summarizeProgress } = require('./web/progress.js');
 const entries = (kinds) => kinds.map(kind => ({kind}));
 const byId = (steps, id) => steps.find(step => step.id === id);
 let steps = summarizeProgress({state:'AWAITING_DECISIONS'}, entries(['UPLOADED','PROFILING','AWAITING_DECISIONS']), {attempts:[],codes:[]});
-assert.equal(byId(steps,'profile').status,'已完成');
-assert.equal(byId(steps,'approval').status,'等待你的审批');
+assert.equal(byId(steps,'profile').status,'Complete');
+assert.equal(byId(steps,'approval').status,'Awaiting your approval');
 steps = summarizeProgress({state:'QUEUED'}, entries(['UPLOADED','QUEUED']), {attempts:[],codes:[]});
-assert.equal(byId(steps,'profile').status,'等待调度');
+assert.equal(byId(steps,'profile').status,'Queued');
 steps = summarizeProgress({state:'SUCCEEDED'}, entries(['SPEC_FROZEN','VALIDATING','VALIDATED','SUCCEEDED']), {attempts:[{stage:'VERIFY_D'}],codes:[],validation:{verdict:'passed',changed_cells:0,mismatch_count:0}});
-assert.equal(byId(steps,'generate').status,'已跳过');
-assert.equal(byId(steps,'execute').status,'已跳过');
-assert.equal(byId(steps,'publish').status,'已完成');
+assert.equal(byId(steps,'generate').status,'Skipped');
+assert.equal(byId(steps,'execute').status,'Skipped');
+assert.equal(byId(steps,'publish').status,'Complete');
 steps = summarizeProgress({state:'FAILED'}, entries(['GENERATING','EXECUTING','VALIDATING','FAILED','ERROR:ValueError']), {attempts:[{stage:'CLEAN_C',state:'finished'},{stage:'VERIFY_D',state:'failed'}],codes:[{}],validation:{verdict:'rejected'}});
-assert.equal(byId(steps,'execute').status,'已完成');
-assert.equal(byId(steps,'validate').status,'失败');
+assert.equal(byId(steps,'execute').status,'Complete');
+assert.equal(byId(steps,'validate').status,'Failed');
 assert.match(byId(steps,'validate').detail,/ERROR:ValueError/);
 steps = summarizeProgress({state:'FAILED'}, entries(['AWAITING_DECISIONS','SPEC_FROZEN','FAILED']), {attempts:[],codes:[]});
-assert.equal(byId(steps,'approval').status,'已完成');
-assert.equal(byId(steps,'generate').status,'后续步骤失败');
+assert.equal(byId(steps,'approval').status,'Complete');
+assert.equal(byId(steps,'generate').status,'A subsequent step failed');
 steps = summarizeProgress({state:'FAILED'}, entries(['UPLOADED','PROFILING']), {attempts:[],codes:[]});
-assert.equal(byId(steps,'diagnosis').status,'待确认');
-assert.notEqual(byId(steps,'profile').status,'失败');
+assert.equal(byId(steps,'diagnosis').status,'Unconfirmed');
+assert.notEqual(byId(steps,'profile').status,'Failed');
+"""
+    result = subprocess.run([node, "-e", script], cwd=ROOT, capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+
+
+def test_upload_and_approval_use_english_validation():
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("Node is optional")
+    script = """
+const assert = require('node:assert/strict');
+const elements = new Map();
+const element = id => {
+  if (!elements.has(id)) elements.set(id, {
+    value: '', files: [], checked: false, textContent: '', hidden: false,
+    handlers: {}, addEventListener(name, fn) { this.handlers[name] = fn; },
+    focus() { global.focused = id; }
+  });
+  return elements.get(id);
+};
+global.document = {getElementById: element, hidden: false};
+global.location = {href: 'http://localhost/'};
+global.setInterval = () => {};
+let requests = 0;
+global.fetch = async () => { requests++; throw Error('blocked test request'); };
+require('./web/app.js');
+const submit = id => element(id).handlers.submit({preventDefault() {}});
+submit('upload-form');
+assert.equal(element('upload-error').textContent, 'Enter the demo access token.');
+assert.equal(global.focused, 'token');
+element('token').value = 'test';
+submit('upload-form');
+assert.equal(element('upload-error').textContent, 'Enter a business goal.');
+assert.equal(global.focused, 'goal');
+element('goal').value = 'test';
+submit('upload-form');
+assert.equal(element('upload-error').textContent, 'Choose a CSV file.');
+assert.equal(global.focused, 'file');
+element('file').files = [{name: '<example>.csv'}];
+element('file').handlers.change();
+assert.equal(element('file-name').textContent, '<example>.csv');
+element('file').files = [];
+element('file').handlers.change();
+assert.equal(element('file-name').textContent, 'No file selected');
+submit('review-form');
+assert.equal(element('review-error').textContent, 'Confirm the decisions and model data-sharing notice.');
+assert.equal(global.focused, 'consent');
+assert.equal(requests, 0);
 """
     result = subprocess.run([node, "-e", script], cwd=ROOT, capture_output=True, text=True)
     assert result.returncode == 0, result.stderr

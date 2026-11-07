@@ -131,11 +131,11 @@ class Publisher:
         with self.store.db() as db:
             task = db.execute("SELECT * FROM tasks WHERE task_id=?", (task_id,)).fetchone()
             if task is None:
-                raise WorkflowConflict("任务不存在")
+                raise WorkflowConflict("Task does not exist")
             if task["state"] == TaskState.SUCCEEDED:
                 return
             if task["state"] not in (TaskState.VALIDATED, TaskState.PUBLISHING):
-                raise WorkflowConflict("任务未经验证或已经取消")
+                raise WorkflowConflict("Task is not validated or has been cancelled")
             flow = db.execute("SELECT * FROM workflows WHERE task_id=?", (task_id,)).fetchone()
             spec = FrozenSpec.model_validate_json(flow["spec_json"])
             jobs = db.execute("SELECT * FROM workflow_jobs WHERE task_id=? ORDER BY rowid",
@@ -223,14 +223,14 @@ class Publisher:
 
     def download(self, task_id: str, artifact_id: str):
         if artifact_id not in ARTIFACTS:
-            raise WorkflowConflict("产物不存在")
+            raise WorkflowConflict("Artifact does not exist")
         task_id = str(UUID(task_id))
         with self.store.db() as db:
             task = db.execute("SELECT state FROM tasks WHERE task_id=?", (task_id,)).fetchone()
             row = db.execute("SELECT * FROM workflow_artifacts WHERE task_id=? AND artifact_id=?",
                              (task_id, artifact_id)).fetchone()
             if task is None or task["state"] != TaskState.SUCCEEDED or row is None:
-                raise WorkflowConflict("产物尚未发布")
+                raise WorkflowConflict("Artifact has not been published")
         name, media_type, limit = ARTIFACTS[artifact_id]
         data = read_private(self.root, self.root / "published" / task_id / name, limit)
         if digest(data) != row["sha256"] or len(data) != row["bytes"]:

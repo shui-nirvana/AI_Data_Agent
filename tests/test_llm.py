@@ -97,10 +97,10 @@ def test_bootstrap_requires_provider_permission_and_key(tmp_path, monkeypatch):
     key_file = tmp_path / ".env.deepseek"
     key_file.write_text("DEEPSEEK_API_KEY=\n")
     monkeypatch.setattr("backend.llm.deepseek.KEY_FILE", key_file)
-    with pytest.raises(ValueError, match="授权"):
+    with pytest.raises(ValueError, match="authorize"):
         build_generator(tmp_path, settings)
     monkeypatch.setenv("AI_AGENT_LLM_ALLOW_EXTERNAL", "true")
-    with pytest.raises(ModelUnavailableError, match="缺失"):
+    with pytest.raises(ModelUnavailableError, match="missing"):
         build_generator(tmp_path, settings)
     monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
     assert isinstance(build_generator(tmp_path, settings), LLMCodeGenerator)
@@ -147,7 +147,7 @@ def test_key_file_invalid_fails_without_leaking_content(tmp_path, monkeypatch, c
 
 def test_key_file_missing_fails_closed(tmp_path, monkeypatch):
     monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
-    with pytest.raises(ModelUnavailableError, match="不存在"):
+    with pytest.raises(ModelUnavailableError, match="missing"):
         DeepSeekClient.from_environment(key_file=tmp_path / ".env.deepseek")
 
 
@@ -364,7 +364,7 @@ def test_repair_includes_only_source_verified_runtime_diagnostic(tmp_path):
     assert "SECRET_LITERAL" not in str(model.calls[-1])
     assert asdict(call(generator.repair(old, "RUNTIME_ERROR", diagnostic, executed(old)))) == asdict(new)
     assert len(model.calls) == 2
-    with pytest.raises(ValueError, match="模型请求"):
+    with pytest.raises(ValueError, match="model request"):
         call(generator.repair(old, "RUNTIME_ERROR", {
             **diagnostic, "function": "PRIVATE_ROW"
         }, executed(old)))
@@ -377,7 +377,7 @@ def test_repair_rejects_source_modified_after_version_was_recorded(tmp_path):
     old = call(generator.generate(str(spec_path), str(profile_path)))
     from pathlib import Path
     Path(old.source_ref).write_text("# unapproved modification\n", encoding="utf-8")
-    with pytest.raises(ValueError, match="执行源码哈希不匹配"):
+    with pytest.raises(ValueError, match="executed source hash does not match"):
         call(generator.repair(old, "RUNTIME_ERROR", None, executed(old)))
     assert len(model.calls) == 1
 

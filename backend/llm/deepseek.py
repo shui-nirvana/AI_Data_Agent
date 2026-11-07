@@ -17,14 +17,14 @@ def load_key_file(path: Path) -> str:
     """Read a key in the fixed format without executing the file or writing the key to the environment."""
     try:
         if path.is_symlink() or not path.is_file():
-            raise ModelUnavailableError("DeepSeek 密钥文件不存在或不是普通文件")
+            raise ModelUnavailableError("The DeepSeek key file is missing or is not a regular file")
         with path.open("rb") as stream:
             raw = stream.read(4097)
         if len(raw) > 4096:
-            raise ModelUnavailableError("DeepSeek 密钥文件超过大小限制")
+            raise ModelUnavailableError("The DeepSeek key file exceeds the size limit")
         lines = raw.decode("utf-8-sig").splitlines()
     except (OSError, UnicodeError):
-        raise ModelUnavailableError("无法读取 DeepSeek 密钥文件") from None
+        raise ModelUnavailableError("Cannot read the DeepSeek key file") from None
     values = []
     for line in lines:
         line = line.strip()
@@ -32,22 +32,22 @@ def load_key_file(path: Path) -> str:
             continue
         name, separator, value = line.partition("=")
         if not separator or name.strip() != "DEEPSEEK_API_KEY":
-            raise ModelUnavailableError("DeepSeek 密钥文件只能包含 DEEPSEEK_API_KEY")
+            raise ModelUnavailableError("The DeepSeek key file may only contain DEEPSEEK_API_KEY")
         value = value.strip()
         if len(value) >= 2 and value[0] in ("'", '"') and value[-1] == value[0]:
             value = value[1:-1]
         values.append(value)
     if len(values) != 1:
-        raise ModelUnavailableError("DeepSeek 密钥文件必须包含唯一的 DEEPSEEK_API_KEY")
+        raise ModelUnavailableError("The DeepSeek key file must contain exactly one DEEPSEEK_API_KEY")
     return values[0]
 
 
 class DeepSeekClient:
     def __init__(self, api_key: str, model: str = DEFAULT_MODEL, *, transport=None):
         if not api_key or api_key != api_key.strip() or any(ord(c) < 33 or ord(c) > 126 for c in api_key):
-            raise ModelUnavailableError("DEEPSEEK_API_KEY 缺失或格式无效")
+            raise ModelUnavailableError("DEEPSEEK_API_KEY is missing or invalid")
         if model not in MODELS:
-            raise ModelUnavailableError("DeepSeek 模型不在已核对的支持列表中")
+            raise ModelUnavailableError("The DeepSeek model is not in the verified supported list")
         self._api_key, self.model, self._transport = api_key, model, transport
 
     @classmethod
@@ -86,7 +86,7 @@ class DeepSeekClient:
                         async for chunk in response.aiter_bytes():
                             content.extend(chunk)
                             if len(content) > 1_000_000:
-                                raise ModelUnavailableError("DeepSeek 响应超过配额")
+                                raise ModelUnavailableError("DeepSeek response exceeds the size limit")
             data = json.loads(content)
             choices = data["choices"]
             if not isinstance(choices, list) or len(choices) != 1:
@@ -114,6 +114,6 @@ class DeepSeekClient:
         except ModelUnavailableError:
             raise
         except (TimeoutError, httpx.HTTPError):
-            raise ModelUnavailableError("DeepSeek 连接或总时限失败；未自动重试") from None
+            raise ModelUnavailableError("DeepSeek connection or overall timeout failed; no automatic retry was made") from None
         except (KeyError, TypeError, ValueError):
-            raise ModelUnavailableError("DeepSeek 响应协议无效") from None
+            raise ModelUnavailableError("DeepSeek response format is invalid") from None

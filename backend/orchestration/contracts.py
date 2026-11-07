@@ -9,24 +9,24 @@ from backend.domain.csv_policy import CSV_POLICY, PARSER_VERSION
 
 def read_json(path: Path, limit: int = 1_000_000):
     if path.is_symlink() or not path.is_file():
-        raise ValueError("证据必须是普通文件")
+        raise ValueError("Evidence must be a regular file")
     with path.open("rb") as stream:
         data = stream.read(limit + 1)
     if len(data) > limit:
-        raise ValueError("JSON 证据超过配额")
+        raise ValueError("JSON evidence exceeds the size limit")
     return json.loads(data)
 
 
 def file_hash(path: Path, limit: int) -> str:
     """Read bytes to verify content binding without interpreting CSV fields."""
     if path.is_symlink() or not path.is_file():
-        raise ValueError("产物必须是普通文件")
+        raise ValueError("Artifact must be a regular file")
     digest, size = hashlib.sha256(), 0
     with path.open("rb") as stream:
         while chunk := stream.read(65536):
             size += len(chunk)
             if size > limit:
-                raise ValueError("产物超过配额")
+                raise ValueError("Artifact exceeds the size limit")
             digest.update(chunk)
     return digest.hexdigest()
 
@@ -34,12 +34,12 @@ def file_hash(path: Path, limit: int) -> str:
 def validate_profile(profile, issues, digest: str):
     """Accept the fixed scanner version and complete tool set; reject damaged or incomplete approval evidence."""
     if not isinstance(profile, dict) or not isinstance(issues, list):
-        raise ValueError("A 输出类型错误")
+        raise ValueError("Stage A output has an invalid type")
     if (profile.get("schema_version") != "1.0" or profile.get("scanner_version") != "0.2.0"
             or profile.get("parser_version") != PARSER_VERSION
             or profile.get("status") != "completed" or profile.get("input_sha256") != digest
             or profile.get("limits") != CSV_POLICY.model_dump()):
-        raise ValueError("A 版本、完成状态或输入不匹配")
+        raise ValueError("Stage A version, completion status, or input does not match")
     columns = profile.get("columns")
     count = profile.get("row_count")
     if (not isinstance(columns, list) or not 1 <= len(columns) <= CSV_POLICY.max_columns
@@ -47,19 +47,19 @@ def validate_profile(profile, issues, digest: str):
                    for c in columns) or len(set(columns)) != len(columns)
             or type(count) is not int or not 0 <= count <= CSV_POLICY.max_rows
             or count * len(columns) > CSV_POLICY.max_cells):
-        raise ValueError("A 表结构或行数不合约")
+        raise ValueError("Stage A table structure or row count violates the contract")
     expected = {"csv_structure", "missing_cells", "duplicate_rows", "type_format", "numeric_range"}
     runs = profile.get("tool_runs", [])
     if (not isinstance(runs, list) or len(runs) != len(expected)
             or any(not isinstance(r, dict) or r.get("status") != "completed"
                    or r.get("version") != "0.2.0" or r.get("input_sha256") != digest for r in runs)
             or {r.get("tool_id") for r in runs} != expected):
-        raise ValueError("A 工具未全部完成")
+        raise ValueError("Not all stage A tools completed")
     aggregates = {}
     for key in ("missing_by_column", "date_formats_by_column", "numeric_by_column"):
         mapping = profile.get(key)
         if not isinstance(mapping, dict) or set(mapping) != set(columns):
-            raise ValueError("A 聚合字段不完整")
+            raise ValueError("Stage A aggregate fields are incomplete")
         aggregates[key] = mapping
     expected_findings = {}
     for column in columns:
@@ -75,11 +75,11 @@ def validate_profile(profile, issues, digest: str):
                 or any(type(numeric.get(key)) is not int or not 0 <= numeric[key] <= count
                        for key in ("count", "negative_count"))
                 or numeric["negative_count"] > numeric["count"]):
-            raise ValueError("A 聚合数值不合约")
+            raise ValueError("Stage A aggregate values violate the contract")
         for key in ("min", "max"):
             value = numeric.get(key)
             if value is not None and (not isinstance(value, str) or len(value) > 130):
-                raise ValueError("A 数值范围不合约")
+                raise ValueError("Stage A numeric range violates the contract")
         facts = {
             "missing_cells": missing,
             "type_format": sum(n for name, n in dates.items() if name != "YYYY-MM-DD"),
@@ -93,28 +93,28 @@ def validate_profile(profile, issues, digest: str):
     }
     seen = set()
     if len(issues) > len(columns):
-        raise ValueError("A 问题数超过列数")
+        raise ValueError("Stage A issue count exceeds the column count")
     for issue in issues:
         if not isinstance(issue, dict):
-            raise ValueError("问题类型错误")
+            raise ValueError("Issue has an invalid type")
         column = issue.get("column")
         if (column not in columns or column in seen or issue.get("source") != "fixed"
                 or issue.get("input_sha256") != digest):
-            raise ValueError("A 问题来源或列不合约")
+            raise ValueError("Stage A issue source or column violates the contract")
         seen.add(column)
         identity = json.dumps([digest, "0.2.0", column], ensure_ascii=False)
         if issue.get("issue_id") != hashlib.sha256(identity.encode("utf-8")).hexdigest():
-            raise ValueError("A 问题标识不匹配")
+            raise ValueError("Stage A issue ID does not match")
         findings = issue.get("findings")
         if not isinstance(findings, list) or not 1 <= len(findings) <= len(semantics):
-            raise ValueError("A 发现集合错误")
+            raise ValueError("Stage A findings are invalid")
         actions, tool_ids = set(), set()
         for finding in findings:
             if not isinstance(finding, dict):
-                raise ValueError("发现类型错误")
+                raise ValueError("Finding has an invalid type")
             tool = finding.get("tool_id")
             if tool not in semantics or tool in tool_ids:
-                raise ValueError("发现工具未登记或重复")
+                raise ValueError("Finding tool is unregistered or duplicated")
             tool_ids.add(tool)
             predicate, allowed = semantics[tool]
             affected = finding.get("affected_count")
@@ -124,14 +124,14 @@ def validate_profile(profile, issues, digest: str):
                     or not isinstance(finding.get("actions"), list)
                     or set(finding["actions"]) != allowed
                     or type(affected) is not int or not 1 <= affected <= count):
-                raise ValueError("发现谓词/动作或范围错误")
+                raise ValueError("Finding predicate, actions, or range is invalid")
             actions.update(allowed)
             if expected_findings[column].get(tool) != affected:
-                raise ValueError("发现范围与聚合事实不一致")
+                raise ValueError("Finding range does not match aggregate facts")
         if not isinstance(issue.get("actions"), list) or set(issue["actions"]) != actions:
-            raise ValueError("审批动作集合不匹配")
+            raise ValueError("Approval action set does not match")
         if tool_ids != set(expected_findings[column]):
-            raise ValueError("列发现不完整")
+            raise ValueError("Column findings are incomplete")
     if seen != {column for column, facts in expected_findings.items() if facts}:
-        raise ValueError("A 问题集合不完整，不能视为零问题")
+        raise ValueError("Stage A issues are incomplete and cannot be treated as zero issues")
     return profile, issues

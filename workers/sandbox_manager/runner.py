@@ -24,17 +24,17 @@ class SandboxManager:
 
         """
         if job.stage not in LIMITS:
-            raise ValueError("未知的作业阶段")
+            raise ValueError("Unknown job stage")
             
         receipt = self.backend.submit(job, LIMITS[job.stage])
         if (receipt.task_id, receipt.attempt_id) != (job.task_id, job.attempt_id):
-            raise ValueError("执行适配器回执与任务不匹配")
+            raise ValueError("Execution adapter receipt does not match the job")
         return receipt
 
     def status(self, receipt: ExecutionReceipt) -> ExecutionStatus:
         result = self.backend.status(receipt)
         if result.receipt != receipt:
-            raise ValueError("执行适配器返回了其他作业的状态")
+            raise ValueError("Execution adapter returned the status of a different job")
         return result
 
     def cancel(self, receipt: ExecutionReceipt) -> None:

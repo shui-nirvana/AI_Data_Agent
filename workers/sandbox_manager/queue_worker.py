@@ -50,7 +50,8 @@ class QueueWorker:
             reclaim(self.backend.client, row["task_id"], row["job_id"])
             if marker_exists(pending):
                 raise UnreclaimedSandbox(
-                    f"作业 {row['job_id']} 的容器创建结果不确定，需先重启 Docker 并人工确认后对账"
+                    f"Container creation for job {row['job_id']} is uncertain; "
+                    "restart Docker and confirm manually before reconciliation"
                 )
             if marker_exists(directory):
                 (directory / "watchdog.done").touch()
@@ -64,7 +65,7 @@ class QueueWorker:
         directory = self.store.root / "worker_jobs" / attempt_id
         marker = directory / "creation.pending"
         if row is None or row["state"] != "running" or not marker.is_file():
-            raise ValueError("没有待确认的不确定创建作业")
+            raise ValueError("No uncertain container creation is awaiting confirmation for this job")
         reclaim(self.backend.client, row["task_id"], attempt_id)
         marker.unlink()
         (directory / "watchdog.done").touch()
@@ -96,7 +97,7 @@ class QueueWorker:
                 sources = {name: Path(ref).resolve()
                            for name, ref in json.loads(stored["sources_json"]).items()}
                 if any(not path.is_relative_to(self.store.root) for path in sources.values()):
-                    raise ValueError("作业来源不在私有目录")
+                    raise ValueError("Job source is outside the private directory")
                 if self.store.task(job.task_id)["state"] == TaskState.CANCELLED:
                     self.store.finish_job(job.attempt_id, "cancelled", None, None)
                     return True
@@ -111,7 +112,7 @@ class QueueWorker:
                 receipt = self.backend.submit(job, LIMITS[job.stage])
                 status = self.backend.status(receipt)
                 if status.result_ref and read_json(Path(status.result_ref)).get("error_code") == "CLEANUP_FAILED":
-                    raise UnreclaimedSandbox("容器未回收，作业保留 running 供重启对账")
+                    raise UnreclaimedSandbox("Container was not reclaimed; job remains running for reconciliation after restart")
                 evidence = None
                 error_code = None if status.state == "finished" else "SANDBOX_FAILED"
                 if status.result_ref:
@@ -122,7 +123,7 @@ class QueueWorker:
                             or manifest.get("spec_sha256") != job.spec_sha256
                             or manifest.get("candidate_sha256") != job.candidate_sha256
                             or manifest.get("stage") != job.stage.value):
-                        raise ValueError("运行回报归属不匹配")
+                        raise ValueError("Execution report does not match the job")
                     category = manifest.get("runtime_category")
                     # Do not repair by default; only explicit C runtime failures or missing output after normal exit may enter repair.
                     if (job.stage == Stage.CLEAN_C and status.state == "failed"
@@ -149,15 +150,15 @@ class QueueWorker:
                         snapshot = Path(snapshot_ref)
                         if (snapshot != expected or snapshot.is_symlink() or not snapshot.is_file()
                                 or not snapshot.resolve().is_relative_to(self.store.root)):
-                            raise ValueError("执行源码快照归属不匹配")
+                            raise ValueError("Executed source snapshot does not match the job")
                         with snapshot.open("rb") as stream:
                             code = stream.read(262145)
                         if len(code) > 262144 or hashlib.sha256(code).hexdigest() != snapshot_hash:
-                            raise ValueError("执行源码快照哈希不匹配")
+                            raise ValueError("Executed source snapshot hash does not match")
                         evidence["executed_source_ref"] = str(snapshot)
                         evidence["executed_source_sha256"] = snapshot_hash
                     elif error_code in ("RUNTIME_ERROR", "MISSING_OUTPUT"):
-                        raise ValueError("缺少失败作业的执行源码快照")
+                        raise ValueError("Executed source snapshot for the failed job is missing")
                     if error_code == "RUNTIME_ERROR":
                         try:
                             source = code.decode("utf-8")
@@ -200,7 +201,7 @@ class QueueWorker:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="独立 Docker 持久作业队列 worker")
+    parser = argparse.ArgumentParser(description="Independent persistent Docker job queue worker")
     parser.add_argument("--data-dir", type=Path,
                         default=Path(os.environ.get("AI_AGENT_DATA_DIR", ".runtime")))
     parser.add_argument("--images", type=Path, default=Path(".runtime/docker/images.json"))

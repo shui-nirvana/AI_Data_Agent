@@ -47,7 +47,7 @@ def run_smoke(manifest: Path, output: Path) -> dict:
         status = manager.status(receipt)
         records.append(json.loads(Path(status.result_ref).read_text(encoding="utf-8")))
         if status.state != "finished":
-            raise RuntimeError(f"{job.stage.value} 烟测失败，参见私有 execution.json")
+            raise RuntimeError(f"{job.stage.value} smoke test failed; see the private execution.json")
         return output / "attempts" / job.attempt_id / "result"
 
     profile_job = JobRequest(task_id, str(uuid4()), Stage.PROFILE_A, digest)
@@ -80,7 +80,7 @@ def run_smoke(manifest: Path, output: Path) -> dict:
     validation = json.loads(validation_path.read_text(encoding="utf-8"))
     if (validation["verdict"] != "passed" or validation["output_sha256"] != candidate_digest
             or hashlib.sha256(original.read_bytes()).hexdigest() != digest):
-        raise RuntimeError("D 报告、候选或原件哈希不一致")
+        raise RuntimeError("D report, candidate, or original hash does not match")
     report = {"kind": "test_source_not_llm", "deployment_platform": configuration["deployment_platform"],
               "target_platform_verified": False, "attempts": records, "validation": validation}
     (output / "smoke.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
@@ -88,12 +88,12 @@ def run_smoke(manifest: Path, output: Path) -> dict:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="运行真实 Docker A/C/D 测试源码烟测")
+    parser = argparse.ArgumentParser(description="Run a real Docker A/C/D smoke test with test source code")
     parser.add_argument("--images", type=Path, default=Path(".runtime/docker/images.json"))
     parser.add_argument("--output", type=Path, default=Path(".runtime/docker/smoke"))
     args = parser.parse_args()
     report = run_smoke(args.images, args.output)
-    print(f"A/C/D 烟测通过，D 改动数={report['validation']['changed_cells']}；不是 LLM 演示。")
+    print(f"A/C/D smoke test passed; D changed cells={report['validation']['changed_cells']}. This is not an LLM demo.")
 
 
 if __name__ == "__main__":

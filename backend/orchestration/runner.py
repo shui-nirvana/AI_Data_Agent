@@ -89,7 +89,7 @@ class GraphRunner:
             return
         try:
             if self.explainer is None:
-                raise ModelUnavailableError("未配置验证解释模型")
+                raise ModelUnavailableError("No validation explanation model is configured")
             result = asyncio.run(self.explainer.explain(task_id, facts))
         except Exception as exc:
             error = ("INVALID_MODEL_EXPLANATION" if isinstance(exc, InvalidExplanation)
@@ -104,10 +104,10 @@ class GraphRunner:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="独立持久化 Graph Runner（不持有 Docker socket）")
+    parser = argparse.ArgumentParser(description="Independent persistent Graph Runner (without Docker socket access)")
     parser.add_argument("--data-dir", type=Path,
                         default=Path(os.environ.get("AI_AGENT_DATA_DIR", ".runtime")))
-    parser.add_argument("--once", action="store_true", help="只处理一条 outbox 后退出")
+    parser.add_argument("--once", action="store_true", help="Process one outbox event and exit")
     args = parser.parse_args()
     from backend.bootstrap import build_generator
     runner = GraphRunner(args.data_dir, build_generator(args.data_dir))

@@ -32,21 +32,21 @@ class JobRequest:
         UUID(self.task_id)
         UUID(self.attempt_id)
         if not isinstance(self.stage, Stage):
-            raise ValueError("未知的作业阶段")
+            raise ValueError("Unknown job stage")
         
         # Length alone does not prove a digest; reject non-hexadecimal references and invalid optional digests.
         if not re.fullmatch(r"[0-9a-f]{64}", self.input_sha256):
-            raise ValueError("必须提供有效的输入文件 SHA-256 哈希")
+            raise ValueError("A valid input file SHA-256 hash is required")
         for digest in (self.spec_sha256, self.code_sha256, self.candidate_sha256):
             if digest is not None and not re.fullmatch(r"[0-9a-f]{64}", digest):
-                raise ValueError("作业摘要必须为 SHA-256")
+                raise ValueError("Job digests must be SHA-256 hashes")
             
         # Check stage-specific required parameters.
         if self.stage != Stage.PROFILE_A and not self.spec_sha256:
-            raise ValueError("C 和 D 阶段需要已冻结的规范哈希")
+            raise ValueError("Stages C and D require a frozen specification hash")
             
         if self.stage == Stage.CLEAN_C and not self.code_sha256:
-            raise ValueError("C 阶段需要记录源代码哈希")
+            raise ValueError("Stage C requires a recorded source code hash")
             
         if self.stage == Stage.VERIFY_D and not self.candidate_sha256:
-            raise ValueError("D 阶段必须绑定特定的候选产物哈希")
+            raise ValueError("Stage D must be bound to a specific candidate artifact hash")

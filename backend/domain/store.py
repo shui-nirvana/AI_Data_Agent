@@ -30,7 +30,7 @@ class TaskStore:
         with self._connect() as db:
             db.executescript(
                 """
-                -- 任务表：存储任务基本信息
+                -- Task metadata.
                 CREATE TABLE IF NOT EXISTS tasks (
                     task_id TEXT PRIMARY KEY,
                     owner_id TEXT NOT NULL,
@@ -41,7 +41,7 @@ class TaskStore:
                     version INTEGER NOT NULL,
                     created_at TEXT NOT NULL
                 );
-                -- 事件表：存储任务状态变更记录
+                -- Task state-change events.
                 CREATE TABLE IF NOT EXISTS events (
                     sequence INTEGER PRIMARY KEY AUTOINCREMENT,
                     task_id TEXT NOT NULL REFERENCES tasks(task_id),

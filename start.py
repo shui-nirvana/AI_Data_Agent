@@ -99,70 +99,70 @@ def write_json(path, value):
 def check_python_version(version, stage="Python"):
     if tuple(version[:2]) < MIN_PYTHON:
         current = ".".join(str(part) for part in version[:2])
-        raise LaunchError(stage, f"当前 Python {current} 低于最低要求 3.11，请更新 Python 后重新运行 python start.py。")
+        raise LaunchError(stage, f"Python {current} is below the minimum version 3.11; upgrade Python and rerun the launcher.")
 
 
 def check_platform():
     if os.name != "nt":
-        raise LaunchError("环境", "此入口当前只支持 Windows；Linux/Vultr 尚未使用此脚本验收。")
+        raise LaunchError("Environment", "This entry point supports Windows only; use start_linux.py on Linux.")
     check_python_version(sys.version_info)
     machine = platform.machine().lower()
     if machine in ("amd64", "x86_64"):
         return "linux/amd64"
     if machine in ("arm64", "aarch64"):
         return "linux/arm64"
-    raise LaunchError("环境", "不支持当前 CPU 架构，请使用 AMD64 或 ARM64。")
+    raise LaunchError("Environment", "Unsupported CPU architecture; use AMD64 or ARM64.")
 
 
 def check_docker(env):
     if not shutil.which("docker"):
-        raise LaunchError("Docker", "找不到 Docker 命令。请安装 Docker Desktop 并重新打开终端。")
+        raise LaunchError("Docker", "Docker was not found. Install Docker Desktop and reopen the terminal.")
     system = run(
         ["docker", "info", "--format", "{{.OSType}}"], "Docker",
-        "无法连接 Docker Linux 引擎。请启动 Docker Desktop 并确认 Linux 容器可用。",
+        "Cannot connect to the Docker Linux engine. Start Docker Desktop and enable Linux containers.",
         env=env, timeout=25, quiet=True,
     )
     if system != "linux":
-        raise LaunchError("Docker", "当前 Docker 不是 Linux 引擎，请切换到 Linux 容器。")
+        raise LaunchError("Docker", "Docker is not using a Linux engine; switch to Linux containers.")
 
 
 def prepare_dependencies(env):
     if not VENV_PYTHON.exists():
         if VENV.exists() and any(VENV.iterdir()):
-            raise LaunchError("Python 环境", ".venv 已存在但缺少 Python，请检查该目录；脚本不会删除它。")
-        step("Python 环境", "创建项目专用 .venv。")
-        run([sys.executable, "-m", "venv", VENV], "Python 环境", "创建虚拟环境失败。", env=env)
+            raise LaunchError("Python environment", ".venv exists but has no Python executable; inspect it. The launcher will not delete it.")
+        step("Python environment", "Creating the project .venv.")
+        run([sys.executable, "-m", "venv", VENV], "Python environment", "Could not create the virtual environment.", env=env)
     version = run(
         [VENV_PYTHON, "-c", "import sys; print('.'.join(map(str, sys.version_info[:2])))"],
-        "Python 环境", "无法读取 .venv 的 Python 版本。", env=env, quiet=True,
+        "Python environment", "Could not read the Python version in .venv.", env=env, quiet=True,
     )
     try:
         venv_version = tuple(int(part) for part in version.split("."))
         if len(venv_version) != 2 or any(part < 0 for part in venv_version):
             raise ValueError("invalid Python version")
     except ValueError as exc:
-        raise LaunchError("Python 环境", "无法识别 .venv 的 Python 版本，请检查已有环境。") from exc
+        raise LaunchError("Python environment", "Invalid Python version in .venv; inspect the existing environment.") from exc
     if venv_version < MIN_PYTHON:
-        raise LaunchError("Python 环境", f".venv 使用 Python {version}，低于最低要求 3.11；请检查并更新该环境，脚本不会删除它。")
+        raise LaunchError("Python environment", f".venv uses Python {version}, below the minimum 3.11; update it. The launcher will not delete it.")
     if venv_version != LOCK_TESTED_PYTHON:
-        step("Python 环境", f".venv 使用 Python {version}；依赖锁基于 3.12 验证，此版本兼容性尚未验证。")
+        step("Python environment", f".venv uses Python {version}; the dependency lock was validated on 3.12 and compatibility with this version is unverified.")
     fingerprint = dependency_fingerprint()
     marker = read_json(DEPENDENCY_MARKER)
     if marker != {"fingerprint": fingerprint, "python": version}:
-        step("依赖", "首次安装或依赖变更：安装锁定依赖，可能需要联网。")
+        step("Dependencies", "Installing locked dependencies after initial setup or a dependency change; network access may be required.")
         run([VENV_PYTHON, "-m", "pip", "install", "--require-hashes", "-r",
-             ROOT / "deploy/control-windows.lock"], "依赖", "锁定依赖安装失败，请检查 Python 版本兼容性、网络和磁盘空间；该锁基于 Python 3.12 验证。", env=env)
+             ROOT / "deploy/control-windows.lock"], "Dependencies", "Locked dependency installation failed; check Python compatibility, network access and disk space. The lock was validated on Python 3.12.", env=env)
         run([VENV_PYTHON, "-m", "pip", "install", "--no-deps", "-e", ROOT],
-            "依赖", "项目安装失败，请检查 Python 构建工具和网络。", env=env)
-        run([VENV_PYTHON, "-m", "pip", "check"], "依赖", "依赖检查失败，请检查 .venv。", env=env)
+            "Dependencies", "Project installation failed; check Python build tools and network access.", env=env)
+        run([VENV_PYTHON, "-m", "pip", "check"], "Dependencies", "Dependency check failed; inspect .venv.", env=env)
         write_json(DEPENDENCY_MARKER, {"fingerprint": fingerprint, "python": version})
     else:
-        run([VENV_PYTHON, "-m", "pip", "check"], "依赖",
-            "已安装依赖不一致，请检查 .venv；脚本不会删除已有环境。", env=env, quiet=True)
+        run([VENV_PYTHON, "-m", "pip", "check"], "Dependencies",
+            "Installed dependencies are inconsistent; inspect .venv. The launcher will not delete it.", env=env, quiet=True)
     run([VENV_PYTHON, "-c",
          "import fastapi,uvicorn,pydantic,docker,httpx,langgraph.checkpoint.sqlite"],
-        "依赖", "必要依赖无法导入，请检查 .venv。", env=env, quiet=True)
-    step("依赖", "项目虚拟环境已就绪。")
+        "Dependencies", "Required dependencies could not be imported; inspect .venv.", env=env, quiet=True)
+    step("Dependencies", "Project virtual environment is ready.")
 
 
 def image_is_current(fingerprint, target_platform, env):
@@ -178,7 +178,7 @@ def image_is_current(fingerprint, target_platform, env):
         return False
     for image in set(images.values()):
         try:
-            run(["docker", "image", "inspect", image], "镜像", "镜像不存在。",
+            run(["docker", "image", "inspect", image], "Images", "Image does not exist.",
                 env=env, timeout=25, quiet=True)
         except LaunchError:
             return False
@@ -188,74 +188,74 @@ def image_is_current(fingerprint, target_platform, env):
 def prepare_images(target_platform, env, target="local"):
     fingerprint = image_fingerprint()
     if not image_is_current(fingerprint, target_platform, env):
-        step("镜像", "首次使用、镜像缺失或源码有变化：构建隔离镜像，可能需要联网。")
+        step("Images", "Building the isolated image because it is missing or sources changed; network access may be required.")
         run([VENV_PYTHON, "-m", "workers.sandbox_manager.build_images",
              "--target", target, "--platform", target_platform],
-            "镜像", "镜像构建失败，请检查 Docker、网络、磁盘与构建输出。", env=env)
+            "Images", "Image build failed; check Docker, network access, disk space and build output.", env=env)
         manifest = read_json(IMAGES)
         if not isinstance(manifest, dict) or not isinstance(manifest.get("images"), dict):
-            raise LaunchError("镜像", "构建后未找到有效镜像清单。")
+            raise LaunchError("Images", "No valid image manifest was found after the build.")
         write_json(IMAGE_MARKER, {"fingerprint": fingerprint, "platform": target_platform,
                                   "images": manifest["images"]})
         if not image_is_current(fingerprint, target_platform, env):
-            raise LaunchError("镜像", "镜像清单或本机镜像校验失败。")
-    step("镜像", f"隔离镜像就绪（{target_platform}）。")
+            raise LaunchError("Images", "Image manifest or local image validation failed.")
+    step("Images", f"Isolated image is ready ({target_platform}).")
 
 
 def choose_model(mode, allow_external, env):
     if mode is None:
-        print("\n选择验证模式：", flush=True)
-        print("  1. 使用 DeepSeek：可能产生费用。")
-        print("  2. 不使用模型：仅可验证全部保留的 A/D 路径。")
-        print("  3. 使用 Vultr Serverless Inference：可能产生费用。")
-        print("  模型接收匿名规则/统计；发生自愈时还会接收失败作业的执行源码。")
+        print("\nSelect a validation mode:", flush=True)
+        print("  1. DeepSeek: charges may apply.")
+        print("  2. No model: only the all-preserve A/D path can be tested.")
+        print("  3. Vultr Serverless Inference: charges may apply.")
+        print("  The model receives anonymized rules and statistics; repair also sends the failed job's executed source.")
         try:
-            choice = input("请输入 1、2 或 3（默认 2）：").strip() or "2"
+            choice = input("Select 1, 2 or 3 [2]: ").strip() or "2"
         except EOFError as exc:
-            raise LaunchError("模型配置", "需要交互选择模式；也可指定 --mode preserve。") from exc
+            raise LaunchError("Model configuration", "Choose a mode interactively or specify --mode preserve.") from exc
         if choice not in ("1", "2", "3"):
-            raise LaunchError("模型配置", "请选择 1、2 或 3。")
+            raise LaunchError("Model configuration", "Select 1, 2 or 3.")
         mode = {"1": "deepseek", "2": "preserve", "3": "vultr"}[choice]
         allow_external = choice != "2"
     if mode in ("deepseek", "vultr") and not allow_external:
-        raise LaunchError("模型配置", "真实模型需要明确同意外发和费用；请交互选择或加 --allow-external。")
+        raise LaunchError("Model configuration", "External models require explicit consent to data transfer and potential charges; choose interactively or use --allow-external.")
     if mode == "preserve":
         env["AI_AGENT_LLM_PROVIDER"] = "disabled"
         env["AI_AGENT_LLM_ALLOW_EXTERNAL"] = "false"
         env.pop("DEEPSEEK_API_KEY", None)
         env.pop("VULTR_SERVERLESS_INFERENCE_API_KEY", None)
-        step("模型配置", "已关闭模型；获批修改的任务不会自动执行。")
+        step("Model configuration", "Model calls are disabled; approved modifications will not run automatically.")
         return
     if mode == "vultr":
         env.pop("DEEPSEEK_API_KEY", None)
         if not env.get("AI_AGENT_LLM_MODEL"):
             if not sys.stdin.isatty():
-                raise LaunchError("模型配置", "请通过 AI_AGENT_LLM_MODEL 指定 Vultr 模型 ID。")
-            env["AI_AGENT_LLM_MODEL"] = input("请输入 Vultr 模型 ID：").strip()
+                raise LaunchError("Model configuration", "Specify a Vultr model ID using AI_AGENT_LLM_MODEL.")
+            env["AI_AGENT_LLM_MODEL"] = input("Enter the Vultr model ID: ").strip()
         key_name = "VULTR_SERVERLESS_INFERENCE_API_KEY"
         if key_name not in env and not (ROOT / ".env.vultr").is_file():
             if not sys.stdin.isatty():
-                raise LaunchError("模型配置", "缺少密钥：请配置私有 .env.vultr 或在交互终端输入。")
-            key = getpass.getpass("请输入 Vultr 推理 API Key（不回显、不保存；留空取消）：")
+                raise LaunchError("Model configuration", "Missing key: configure a private .env.vultr or enter it interactively.")
+            key = getpass.getpass("Enter the Vultr inference API key (hidden and not saved; leave empty to cancel): ")
             if not key:
-                raise LaunchError("模型配置", "未提供密钥，启动已取消。")
+                raise LaunchError("Model configuration", "No key provided; startup cancelled.")
             env[key_name] = key
         env["AI_AGENT_LLM_PROVIDER"] = "vultr"
         env["AI_AGENT_LLM_ALLOW_EXTERNAL"] = "true"
         run([VENV_PYTHON, "-c",
              "import os; from backend.llm.vultr import VultrInferenceClient; "
              "VultrInferenceClient.from_environment(os.environ['AI_AGENT_LLM_MODEL'])"],
-            "模型配置", "密钥或模型配置无效，请检查环境变量及 .env.vultr；不会打印密钥。",
+            "Model configuration", "Invalid key or model configuration; check environment variables and .env.vultr. Keys are not printed.",
             env=env, quiet=True)
-        step("模型配置", "密钥格式已检查；尚未连接模型，真实任务可能产生费用。")
+        step("Model configuration", "Key format checked; no model connection was made. Real tasks may incur charges.")
         return
     env.pop("VULTR_SERVERLESS_INFERENCE_API_KEY", None)
     if "DEEPSEEK_API_KEY" not in env and not (ROOT / ".env.deepseek").is_file():
         if not sys.stdin.isatty():
-            raise LaunchError("模型配置", "缺少密钥：请配置私有 .env.deepseek 或在交互终端输入。")
-        key = getpass.getpass("请输入 DeepSeek 密钥（不回显、不保存；留空取消）：")
+            raise LaunchError("Model configuration", "Missing key: configure a private .env.deepseek or enter it interactively.")
+        key = getpass.getpass("Enter the DeepSeek key (hidden and not saved; leave empty to cancel): ")
         if not key:
-            raise LaunchError("模型配置", "未提供密钥，启动已取消。")
+            raise LaunchError("Model configuration", "No key provided; startup cancelled.")
         env["DEEPSEEK_API_KEY"] = key
     env["AI_AGENT_LLM_PROVIDER"] = "deepseek"
     env["AI_AGENT_LLM_MODEL"] = env.get("AI_AGENT_LLM_MODEL") or "deepseek-flash"
@@ -263,9 +263,9 @@ def choose_model(mode, allow_external, env):
     run([VENV_PYTHON, "-c",
          "import os; from backend.llm.deepseek import DeepSeekClient; "
          "DeepSeekClient.from_environment(os.environ['AI_AGENT_LLM_MODEL'])"],
-        "模型配置", "密钥或模型配置无效，请检查环境变量及 .env.deepseek；不会打印密钥。",
+        "Model configuration", "Invalid key or model configuration; check environment variables and .env.deepseek. Keys are not printed.",
         env=env, quiet=True)
-    step("模型配置", "密钥格式已检查；尚未连接模型，真实任务可能产生费用。")
+    step("Model configuration", "Key format checked; no model connection was made. Real tasks may incur charges.")
 
 
 def port_available(port):
@@ -292,7 +292,7 @@ def wait_ready(process, root, port, token, started, timeout=60):
     opener = build_opener(ProxyHandler({}))
     while time.monotonic() < deadline:
         if process.poll() is not None:
-            raise LaunchError("服务启动", "服务提前退出，请检查上方进程输出。")
+            raise LaunchError("Service startup", "A service exited early; check the process output above.")
         try:
             request = Request(f"http://127.0.0.1:{port}/ready", headers={"X-Demo-Token": token})
             with opener.open(request, timeout=2) as response:
@@ -302,19 +302,19 @@ def wait_ready(process, root, port, token, started, timeout=60):
         except (HTTPError, URLError, OSError, ValueError, TimeoutError):
             pass
         time.sleep(0.25)
-    raise LaunchError("服务启动", "等待 API、Runner、worker 就绪超时，请检查上方进程输出。")
+    raise LaunchError("Service startup", "Timed out waiting for API, Runner and worker; check the process output above.")
 
 
 def show_status(root, port):
     if not VENV_PYTHON.exists():
-        raise LaunchError("状态", "尚未创建项目虚拟环境，请先运行 python start.py。")
+        raise LaunchError("Status", "The project virtual environment does not exist; start the launcher first.")
     env = dict(os.environ)
     env.pop("DEEPSEEK_API_KEY", None)
     env.pop("VULTR_SERVERLESS_INFERENCE_API_KEY", None)
     env.pop("VULTR_API_KEY", None)
     env.pop("AI_AGENT_DEMO_TOKEN", None)
     raw = run([VENV_PYTHON, "-m", "backend.local_runtime", "status", "--data-dir", root],
-              "状态", "无法查询本地服务心跳，请检查虚拟环境及数据目录。",
+              "Status", "Cannot query service heartbeats; check the virtual environment and data directory.",
               env=env, timeout=15, quiet=True)
     try:
         state = json.loads(raw)
@@ -325,7 +325,7 @@ def show_status(root, port):
                        for name in ("api", "runner", "worker"))):
             raise ValueError("invalid status")
     except (ValueError, TypeError, KeyError):
-        raise LaunchError("状态", "服务心跳结果无效，请检查启动终端。") from None
+        raise LaunchError("Status", "Invalid heartbeat result; check the startup terminal.") from None
 
     try:
         opener = build_opener(ProxyHandler({}))
@@ -337,26 +337,26 @@ def show_status(root, port):
     except (HTTPError, URLError, OSError, ValueError, TimeoutError):
         api_reachable = False
 
-    step("API HTTP", f"127.0.0.1:{port}/health {'可访问' if api_reachable else '不可用或返回异常'}（未鉴权）。")
+    step("API HTTP", f"127.0.0.1:{port}/health {'reachable' if api_reachable else 'unavailable or invalid'} (unauthenticated).")
     for name in ("api", "runner", "worker"):
         item = services[name]
         age = item.get("age_seconds")
-        age_text = f"，{age} 秒前" if isinstance(age, (int, float)) else ""
-        step(name, f"最近心跳{'有效' if item['ready'] else '缺失或过期'}{age_text}。")
-    print("状态基于 HTTP 和最近心跳，不证明进程实时存活、Docker 或模型可用；启动时会另行鉴权检查 /ready。",
+        age_text = f", {age} seconds ago" if isinstance(age, (int, float)) else ""
+        step(name, f"Latest heartbeat {'valid' if item['ready'] else 'missing or expired'}{age_text}.")
+    print("Status uses HTTP and recent heartbeats; it does not prove that processes, Docker or the model are currently available. Startup separately checks authenticated /ready.",
           flush=True)
     if not api_reachable or not state["ready"] or not all(
         services[name]["ready"] for name in ("api", "runner", "worker")
     ):
-        raise LaunchError("状态", "服务尚未全部就绪，请查看启动终端；若使用自定义端口，请同时指定 --port。")
-    step("状态", "API 可访问，三项最近心跳有效。")
+        raise LaunchError("Status", "Services are not all ready; check the startup terminal and specify --port if using a custom port.")
+    step("Status", "API is reachable and all three recent heartbeats are valid.")
 
 
 def request_stop(root, timeout=110):
     services = root / "services"
     if not root.is_dir() or not any((services / f"{name}.json").exists()
                                     for name in ("api", "runner", "worker")):
-        raise LaunchError("停止", "未发现服务心跳；没有发出停止请求，请确认监督器是否仍在运行。")
+        raise LaunchError("Stop", "No service heartbeat found; no stop requested. Check whether the supervisor is still running.")
     marker = root / "stop.request"
     marker.touch(exist_ok=True)
     deadline = time.monotonic() + timeout
@@ -365,11 +365,11 @@ def request_stop(root, timeout=110):
                                            for name in ("api", "runner", "worker")):
             return
         time.sleep(0.25)
-    raise LaunchError("停止", "未确认服务停止及容器回收，请检查启动终端和 Docker；未强制终止。")
+    raise LaunchError("Stop", "Service shutdown and container recovery are unconfirmed; check the startup terminal and Docker. No forced termination was attempted.")
 
 
 def launch(port, mode, allow_external, open_browser=True):
-    step("环境", "检查 Windows、Python 与 Docker。")
+    step("Environment", "Checking Windows, Python and Docker.")
     target_platform = check_platform()
     env = dict(os.environ)
     secret_names = ("DEEPSEEK_API_KEY", "VULTR_SERVERLESS_INFERENCE_API_KEY", "VULTR_API_KEY")
@@ -378,7 +378,7 @@ def launch(port, mode, allow_external, open_browser=True):
     env["AI_AGENT_EXECUTION_BACKEND"] = "disabled"
     check_docker(env)
     if not port_available(port):
-        raise LaunchError("端口", f"127.0.0.1:{port} 已被占用，请关闭占用程序或使用 --port。")
+        raise LaunchError("Port", f"127.0.0.1:{port} is already in use; stop the other process or use --port.")
     prepare_dependencies(env)
     prepare_images(target_platform, env)
     for name in ("DEEPSEEK_API_KEY", "VULTR_SERVERLESS_INFERENCE_API_KEY"):
@@ -389,39 +389,39 @@ def launch(port, mode, allow_external, open_browser=True):
     env["AI_AGENT_DEMO_TOKEN"] = token
     command = [str(VENV_PYTHON), "-m", "backend.local_runtime", "start",
                "--data-dir", str(RUNTIME), "--images", str(IMAGES), "--port", str(port)]
-    step("服务启动", "启动 API、Runner 和 Docker worker；请保持本窗口打开。")
+    step("Service startup", "Starting API, Runner and Docker worker; keep this window open.")
     started = time.time()
     try:
         process = subprocess.Popen(command, cwd=ROOT, env=env)
     except OSError as exc:
-        raise LaunchError("服务启动", "无法启动本地监督器。") from exc
+        raise LaunchError("Service startup", "Could not start the local supervisor.") from exc
     try:
         wait_ready(process, RUNTIME, port, token, started)
         url = f"http://127.0.0.1:{port}/"
-        step("就绪", "三进程心跳已就绪。模型连通性和业务任务尚未验证。")
-        print(f"页面：{url}")
-        print(f"本次演示令牌（在页面输入）：{token}", flush=True)
-        print("请手动上传、启动检测、审批并观察证据；关闭请按 Ctrl+C。", flush=True)
+        step("Ready", "All three process heartbeats are ready. Model connectivity and business tasks have not been verified.")
+        print(f"Page: {url}")
+        print(f"Demo token (enter on the page; keep private): {token}", flush=True)
+        print("Upload, start detection, approve and inspect the evidence manually; press Ctrl+C to stop.", flush=True)
         if open_browser:
             try:
                 if not webbrowser.open(url):
-                    print("未能自动打开浏览器，请手动访问上面的地址。", flush=True)
+                    print("Could not open a browser; visit the address above manually.", flush=True)
             except Exception:
-                print("未能自动打开浏览器，请手动访问上面的地址。", flush=True)
+                print("Could not open a browser; visit the address above manually.", flush=True)
         result = process.wait()
         if result:
-            raise LaunchError("运行", "监督器异常退出，请检查上方输出和 Docker 回收状态。")
+            raise LaunchError("Runtime", "Supervisor exited with an error; check the output and Docker recovery status.")
     except (KeyboardInterrupt, LaunchError) as original:
         if process.poll() is None:
             (RUNTIME / "stop.request").touch(exist_ok=True)
             try:
                 process.wait(timeout=110)
             except subprocess.TimeoutExpired as exc:
-                raise LaunchError("停止", "监督器未及时退出，请检查 Docker；未强制终止。") from exc
+                raise LaunchError("Stop", "Supervisor did not exit in time; check Docker. No forced termination was attempted.") from exc
         if process.returncode:
             if isinstance(original, LaunchError):
-                raise LaunchError(original.stage, f"{original} 监督器返回非零，请检查回收状态。") from original
-            raise LaunchError("停止", "监督器或容器回收失败，请检查上方输出和 Docker。")
+                raise LaunchError(original.stage, f"{original} Supervisor returned a nonzero status; check recovery.") from original
+            raise LaunchError("Stop", "Supervisor or container recovery failed; check the output and Docker.")
         raise
 
 
@@ -440,16 +440,16 @@ def main():
             launch(args.port, args.mode, args.allow_external, not args.no_browser)
         elif args.command == "stop":
             request_stop(RUNTIME)
-            step("停止", "监督器已退出并完成回收流程。")
+            step("Stop", "The supervisor exited and completed recovery.")
         else:
             show_status(RUNTIME, args.port)
     except KeyboardInterrupt:
-        step("中断", "操作已中断；若服务已启动，请检查监督器和 Docker 回收状态。")
+        step("Interrupted", "Operation interrupted; if services started, check supervisor and Docker recovery.")
     except LaunchError as exc:
-        print(f"[失败：{exc.stage}] {exc}", file=sys.stderr, flush=True)
+        print(f"[Failed: {exc.stage}] {exc}", file=sys.stderr, flush=True)
         return 1
     except OSError:
-        print("[失败：文件访问] 无法读写项目文件，请检查文件是否完整、权限及磁盘空间。",
+        print("[Failed: filesystem] Cannot read or write project files; check completeness, permissions and disk space.",
               file=sys.stderr, flush=True)
         return 1
     return 0

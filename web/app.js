@@ -2,9 +2,9 @@
 const $ = (id) => document.getElementById(id);
 const terminal = new Set(["SUCCEEDED", "FAILED", "CANCELLED"]);
 const names = {
-  preserve: "保留原样",
-  normalize_date: "规范日期",
-  fill_null_with_literal: "填充空字符串",
+  preserve: "Preserve",
+  normalize_date: "Normalize dates",
+  fill_null_with_literal: "Fill empty strings",
 };
 let taskId = new URL(location.href).searchParams.get("task");
 let reviewVersion = null;
@@ -24,7 +24,7 @@ async function request(path, options = {}) {
   });
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
-    throw new Error(body.detail || `请求失败 (${response.status})`);
+    throw new Error(body.detail || `Request failed (${response.status})`);
   }
   return response;
 }
@@ -40,7 +40,7 @@ function showTask(task) {
   history.replaceState(null, "", url);
   $("restore-id").value = taskId;
   $("status").textContent =
-    `任务 ${task.state}${task.state === "SUCCEEDED" ? "：独立验证通过，已发布。" : ""}`;
+    `Task ${task.state}${task.state === "SUCCEEDED" ? ": independently validated and published." : ""}`;
   $("details").textContent = JSON.stringify(task, null, 2);
   $("refresh").hidden = false;
   $("start").hidden = task.state !== "UPLOADED";
@@ -63,7 +63,7 @@ function renderReview(review) {
     const facts = document.createElement("pre");
     facts.textContent = JSON.stringify(issue.findings, null, 2);
     const select = document.createElement("select");
-    select.setAttribute("aria-label", `${issue.column} 清洗动作`);
+    select.setAttribute("aria-label", `${issue.column} cleaning action`);
     for (const action of issue.actions) {
       const option = document.createElement("option");
       option.value = action;
@@ -93,11 +93,11 @@ function renderReview(review) {
         }
       } else if (select.value === "fill_null_with_literal") {
         const label = document.createElement("label");
-        label.textContent = "明确填充值（只替换空字符串，不替换空格或 NA）";
+        label.textContent = "Fill value (replaces empty strings only, not spaces or NA)";
         const input = document.createElement("input");
         input.type = "text";
         input.maxLength = 1024;
-        input.setAttribute("aria-label", `${issue.column} 填充值`);
+        input.setAttribute("aria-label", `${issue.column} fill value`);
         params.append(label, input);
         card.literal = input;
       }
@@ -116,13 +116,13 @@ function renderExplanation(explanation) {
   $("explain").disabled = explanationPending;
   $("explanation-text").textContent = explanation.result?.text || "";
   const messages = {
-    not_requested: "尚未请求解释。",
-    pending: "解释已排队，等待 Graph Runner。",
-    started: "模型正在组织验证说明。",
-    completed: "解释已生成；D 报告仍是权威结论。",
-    failed: "解释不可用，不影响 D 结论或下载；本任务不会自动重复调用。",
+    not_requested: "No explanation requested yet.",
+    pending: "Explanation queued for the Graph Runner.",
+    started: "The model is preparing the validation explanation.",
+    completed: "Explanation generated; the D report remains authoritative.",
+    failed: "Explanation unavailable; the D verdict and downloads are unaffected. This task will not retry automatically.",
   };
-  $("explanation-status").textContent = messages[explanation.status] || "解释状态未知。";
+  $("explanation-status").textContent = messages[explanation.status] || "Unknown explanation status.";
 }
 
 async function refreshTask() {
@@ -172,7 +172,7 @@ async function refreshTask() {
     for (const stage of window.summarizeProgress(task, eventItems, evidence)) {
       const entry = document.createElement("li");
       const title = document.createElement("strong");
-      title.textContent = `${stage.label}：${stage.status}`;
+      title.textContent = `${stage.label}: ${stage.status}`;
       const detail = document.createElement("p");
       detail.textContent = stage.detail;
       entry.append(title, detail);
@@ -190,7 +190,7 @@ async function refreshTask() {
     for (const artifact of evidence.artifacts) {
       const button = document.createElement("button");
       button.type = "button";
-      button.textContent = `下载 ${artifact.artifact_id}`;
+      button.textContent = `Download ${artifact.artifact_id}`;
       button.addEventListener("click", () =>
         run(async () => {
           const response = await request(
@@ -223,8 +223,24 @@ async function run(action) {
   }
 }
 
+$("file").addEventListener("change", () => {
+  $("file-name").textContent = $("file").files[0]?.name || "No file selected";
+});
+
 $("upload-form").addEventListener("submit", (event) => {
   event.preventDefault();
+  $("upload-error").textContent = "";
+  for (const [id, message] of [
+    ["token", "Enter the demo access token."],
+    ["goal", "Enter a business goal."],
+    ["file", "Choose a CSV file."],
+  ]) {
+    if (id === "file" ? !$("file").files.length : !$(id).value.trim()) {
+      $("upload-error").textContent = message;
+      $(id).focus();
+      return;
+    }
+  }
   run(async () => {
     const response = await request("/api/tasks", {
       method: "POST",
@@ -271,6 +287,12 @@ for (const action of ["start", "cancel"]) {
 }
 $("review-form").addEventListener("submit", (event) => {
   event.preventDefault();
+  $("review-error").textContent = "";
+  if (!$("consent").checked) {
+    $("review-error").textContent = "Confirm the decisions and model data-sharing notice.";
+    $("consent").focus();
+    return;
+  }
   run(async () => {
     const decisions = cards.map((card) => {
       const action = card.select.value;
@@ -285,7 +307,7 @@ $("review-form").addEventListener("submit", (event) => {
             ? { literal: card.literal.value }
             : {};
       if (action === "normalize_date" && !params.input_formats.length)
-        throw new Error("请选择至少一种日期输入格式。");
+        throw new Error("Select at least one date input format.");
       return {
         issue_id: card.issue.issue_id,
         column: card.issue.column,

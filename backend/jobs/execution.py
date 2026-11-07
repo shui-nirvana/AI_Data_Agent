@@ -52,10 +52,10 @@ class DisabledExecutionBackend:
     """Fail explicitly without an adapter; never fall back to control-plane subprocesses or local CSV parsing."""
 
     def submit(self, job: JobRequest, limits: SandboxLimits) -> ExecutionReceipt:
-        raise NotImplementedError("尚未接入并验收容器运行时适配器")
+        raise NotImplementedError("No container runtime adapter has been configured and validated")
 
     def status(self, receipt: ExecutionReceipt) -> ExecutionStatus:
-        raise NotImplementedError("执行适配器未配置")
+        raise NotImplementedError("Execution adapter is not configured")
 
     def cancel(self, receipt: ExecutionReceipt) -> None:
-        raise NotImplementedError("执行适配器未配置")
+        raise NotImplementedError("Execution adapter is not configured")

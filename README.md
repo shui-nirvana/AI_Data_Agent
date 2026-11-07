@@ -1,16 +1,16 @@
 # AI Data Agent
 
-AI Data Agent is a sandbox-first CSV cleaning demonstration for the Vultr hackathon. A fixed profiler finds issues, a person approves per-column rules, an LLM generates cleaning code, and a fresh isolated Docker container executes it. An independent verifier checks the result before publication.
+AI Data Agent is a sandbox-first CSV cleaning demonstration. A fixed profiler finds issues, a person approves per-column rules, an LLM generates cleaning code, and a fresh isolated Docker container executes it. An independent verifier checks the result before publication.
 
 ## Status
 
 - Vultr Serverless Inference has been exercised with `deepseek-v4.1-flash-1017` from a local machine. Local Docker and Vultr inference completed both a 50,000-row normal workflow and a controlled repair workflow.
-- The application has **not yet been deployed or accepted on a Vultr VM**. A public demo, video, and final LabLab submission remain outstanding.
-- This is a single-user demo for non-sensitive data, not a production or public-facing service. The current interface and runtime messages are in Chinese.
+- The application has **not yet been deployed or accepted on a Vultr VM**.
+- This is a single-user demo for non-sensitive data, not a production or public-facing service.
 
 ## Infrastructure
 
-The backend consists of a FastAPI service, a LangGraph Runner, a SQLite-backed queue and an independent Docker worker. The Runner connects to Vultr Serverless Inference for code generation and eligible repairs; the worker executes jobs in local Docker containers. Vultr Serverless Inference is the Vultr service exercised so far. The intended Vultr VM hosting and sandbox deployment still require implementation and acceptance; no cloud VM execution is claimed.
+The backend consists of a FastAPI service, a LangGraph Runner, a SQLite-backed queue and an independent Docker worker. The Runner connects to Vultr Serverless Inference for code generation and eligible repairs; the worker executes jobs in local Docker containers. Vultr Serverless Inference is the Vultr service exercised so far. VM deployment and sandbox behavior still require target-host acceptance; no cloud VM execution is claimed.
 
 ## Workflow
 

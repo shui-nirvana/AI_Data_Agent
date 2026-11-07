@@ -16,15 +16,15 @@ from backend.domain.spec import FrozenSpec
 def main() -> None:
     """Cleaning program entrypoint."""
     if os.environ.get("AI_AGENT_SANDBOX_JOB") != "CLEAN_C":
-        raise SystemExit("C 仅允许在受信 worker 创建的受限容器中运行")
+        raise SystemExit("Stage C may run only in a restricted container created by a trusted worker")
     # The environment flag is not a sandbox boundary; the worker's Docker configuration enforces isolation.
     with Path("/input/spec.json").open("rb") as stream:
         content = stream.read(262145)
     if len(content) > 262144:
-        raise ValueError("规范超过大小限制")
+        raise ValueError("Specification exceeds the size limit")
     FrozenSpec.model_validate_json(content)
     if Path("/input/clean.py").stat().st_size > 262144:
-        raise ValueError("源码超过大小限制")
+        raise ValueError("Source exceeds the size limit")
     violation = False
 
     def audit(event, args):

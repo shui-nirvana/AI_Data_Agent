@@ -43,18 +43,18 @@ def archive_file(container, path: str, max_bytes: int) -> bytes:
     for chunk in chunks:
         payload.extend(chunk)
         if len(payload) > max_bytes + 65536:
-            raise ValueError("容器文件传输超过配额")
+            raise ValueError("Container file transfer exceeds the size limit")
     with tarfile.open(fileobj=io.BytesIO(payload), mode="r:") as archive:
         members = archive.getmembers()
         if len(members) != 1:
-            raise ValueError("容器返回了非单文件产物")
+            raise ValueError("Container returned an artifact that is not a single file")
         member = members[0]
         if (not member.isfile() or member.name != Path(path).name
                 or member.size > max_bytes):
-            raise ValueError("容器文件类型、名称或大小违反契约")
+            raise ValueError("Container file type, name, or size violates the contract")
         stream = archive.extractfile(member)
         if stream is None:
-            raise ValueError("容器产物不可读取")
+            raise ValueError("Container artifact cannot be read")
         return stream.read(max_bytes + 1)
 
 
@@ -69,10 +69,10 @@ def collect_snapshot(client, container, stage: Stage, limits) -> dict[str, bytes
     for chunk in chunks:
         payload.extend(chunk)
         if len(payload) > limits.output_bytes + 2 * 65536 + 65536:
-            raise ValueError("收集传输超过配额")
+            raise ValueError("Collector transfer exceeds the size limit")
     result = client.api.exec_inspect(execution)
     if result["Running"] or result["ExitCode"] != 0:
-        raise ValueError("可信收集器失败")
+        raise ValueError("Trusted collector failed")
     allowed = set(OUTPUTS[stage]) | {"stdout.log", "stderr.log"}
     if stage == Stage.CLEAN_C:
         allowed.add("runtime.json")
@@ -84,12 +84,12 @@ def collect_snapshot(client, container, stage: Stage, limits) -> dict[str, bytes
             )
             if (member.name not in allowed or member.name in files or not member.isfile()
                     or member.size > quota):
-                raise ValueError("收集文件不合约")
+                raise ValueError("Collected file violates the contract")
             files[member.name] = archive.extractfile(member).read(quota + 1)
     if sum(
         len(files[name]) for name in OUTPUTS[stage] if name in files
     ) > limits.output_bytes:
-        raise ValueError("产物总大小超限")
+        raise ValueError("Total artifact size exceeds the limit")
     return files
 
 
@@ -100,7 +100,7 @@ class DockerExecutionBackend:
         if set(images) != set(Stage) or any(
             not re.fullmatch(r"sha256:[0-9a-f]{64}", image) for image in images.values()
         ):
-            raise ValueError("A/C/D 必须使用本地不可变 Docker 镜像 ID")
+            raise ValueError("A/C/D must use local immutable Docker image IDs")
         if client is None:
             import docker
             client = docker.from_env(timeout=15)
@@ -110,13 +110,13 @@ class DockerExecutionBackend:
         if info.get("OSType") != "linux" or not any(
             "seccomp" in item for item in info.get("SecurityOptions", [])
         ):
-            raise RuntimeError("需要启用 seccomp 的 Linux Docker 引擎")
+            raise RuntimeError("A Linux Docker engine with seccomp enabled is required")
         if not all(info.get(key) for key in ("MemoryLimit", "SwapLimit", "PidsLimit")):
-            raise RuntimeError("Docker 引擎缺少内存/Swap/PID 限额能力")
+            raise RuntimeError("Docker engine lacks memory, swap, or PID limit support")
         # Do not pull automatically or resolve mutable tags during execution.
         for image in set(images.values()):
             if client.images.get(image).id != image:
-                raise ValueError("本地镜像 ID 不匹配")
+                raise ValueError("Local image ID does not match")
         self.root = root.resolve()
         self.root.mkdir(parents=True, exist_ok=True)
         self._prepared = {}
@@ -129,27 +129,27 @@ class DockerExecutionBackend:
     def prepare(self, job: JobRequest, sources: dict[str, Path]) -> None:
         """Copy input snapshots in a trusted worker; source paths must not come from HTTP or model parameters."""
         if set(sources) != set(INPUTS[job.stage]):
-            raise ValueError("作业输入文件集不匹配")
+            raise ValueError("Job input file set does not match")
         directory = self.root / job.attempt_id / "input"
         content = {}
         for name, source in sources.items():
             if source.is_symlink() or not source.is_file():
-                raise ValueError("作业来源必须是普通文件")
+                raise ValueError("Job source must be a regular file")
             with source.open("rb") as stream:
                 data = stream.read(INPUT_LIMITS[name] + 1)
             if len(data) > INPUT_LIMITS[name]:
-                raise ValueError("作业输入超过配额")
+                raise ValueError("Job input exceeds the size limit")
             content[name] = data
         if hashlib.sha256(content["data.csv"]).hexdigest() != job.input_sha256:
-            raise ValueError("输入快照哈希不匹配")
+            raise ValueError("Input snapshot hash does not match")
         if job.stage != Stage.PROFILE_A:
             spec = FrozenSpec.model_validate_json(content["spec.json"])
             if (spec.spec_sha256 != job.spec_sha256 or str(spec.task_id) != job.task_id
                     or spec.input_sha256 != job.input_sha256):
-                raise ValueError("规范与作业不匹配")
+                raise ValueError("Specification does not match the job")
         if ("candidate.csv" in content
                 and hashlib.sha256(content["candidate.csv"]).hexdigest() != job.candidate_sha256):
-            raise ValueError("候选哈希不匹配")
+            raise ValueError("Candidate hash does not match")
         directory.mkdir(parents=True, exist_ok=False)
         try:
             for name, data in content.items():
@@ -171,24 +171,24 @@ class DockerExecutionBackend:
     def _checked_clean_snapshot(self, job: JobRequest) -> bytes:
         path = self.root / job.attempt_id / "input" / "clean.py"
         if path.is_symlink() or not path.is_file():
-            raise ValueError("执行源码快照不是普通文件")
+            raise ValueError("Executed source snapshot is not a regular file")
         with path.open("rb") as stream:
             code = stream.read(INPUT_LIMITS["clean.py"] + 1)
         if (len(code) > INPUT_LIMITS["clean.py"]
                 or hashlib.sha256(code).hexdigest() != self._clean_snapshot_hashes.get(job.attempt_id)):
-            raise ValueError("执行源码快照哈希不匹配")
+            raise ValueError("Executed source snapshot hash does not match")
         return code
 
     def submit(self, job: JobRequest, limits) -> ExecutionReceipt:
         """Run a local image once and remove its container; a repeated completed submission returns the same receipt."""
         if limits != LIMITS[job.stage] or self._prepared.get(job.attempt_id) != job:
-            raise ValueError("作业未准备或资源策略不匹配")
+            raise ValueError("Job is not prepared or its resource policy does not match")
         receipt = ExecutionReceipt(job.task_id, job.attempt_id, f"docker-{job.attempt_id}")
         with self._lock:
             if receipt.handle in self._results:
                 return receipt
             if receipt.handle in self._active:
-                raise RuntimeError("该尝试已经执行中")
+                raise RuntimeError("This attempt is already running")
             self._active[receipt.handle] = None
         container = None
         started = time.monotonic()
@@ -248,7 +248,7 @@ class DockerExecutionBackend:
             container.start()
             with self._lock:
                 if receipt.handle in self._cancelled:
-                    raise RuntimeError("作业已取消")
+                    raise RuntimeError("Job was cancelled")
             execution = self.client.api.exec_create(
                 container.id, ["python", "-m", "images.job_entry", job.stage.value],
                 stdout=False, stderr=False, user="10001:10001",
@@ -299,7 +299,7 @@ class DockerExecutionBackend:
                     runtime_category = runtime.get("category")
                     if runtime_category not in ("completed", "runtime_error", "security_violation",
                                                 "restricted_or_input_error", "unknown_error"):
-                        raise ValueError("无效运行诊断类别")
+                        raise ValueError("Invalid runtime diagnostic category")
                     if (job.stage == Stage.CLEAN_C and runtime_category == "runtime_error"
                             and exit_code == 1):
                         try:
@@ -346,7 +346,7 @@ class DockerExecutionBackend:
                     state = "cancelled"
                 self._active[receipt.handle] = None
         if unreclaimed:
-            raise UnreclaimedSandbox(f"作业 {job.attempt_id} 的容器创建或回收未确认，保留作业供对账")
+            raise UnreclaimedSandbox(f"Container creation or cleanup for job {job.attempt_id} is unconfirmed; the job is retained for reconciliation")
         manifest = {
             "task_id": job.task_id, "attempt_id": job.attempt_id, "stage": job.stage.value,
             "input_sha256": job.input_sha256, "spec_sha256": job.spec_sha256,
@@ -395,14 +395,14 @@ class DockerExecutionBackend:
                 return result
             if receipt.handle in self._active:
                 return ExecutionStatus(receipt, "running")
-        raise ValueError("作业尚未提交")
+        raise ValueError("Job has not been submitted")
 
     def _check_receipt(self, receipt: ExecutionReceipt) -> None:
         if receipt.handle != f"docker-{receipt.attempt_id}":
-            raise ValueError("非法回执")
+            raise ValueError("Invalid receipt")
         job = self._prepared.get(receipt.attempt_id)
         if job is None or job.task_id != receipt.task_id:
-            raise ValueError("回执与作业归属不匹配")
+            raise ValueError("Receipt does not match the job")
 
     def cancel(self, receipt: ExecutionReceipt) -> None:
         # This adapter supports cancellation within its process; durable cross-process cancellation is handled by the queue worker.

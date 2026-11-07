@@ -291,7 +291,7 @@ def test_running_query_and_cancellation(prepared):
 
     def cancel_running():
         assert backend.status(receipt).state == "running"
-        with pytest.raises(RuntimeError, match="执行中"):
+        with pytest.raises(RuntimeError, match="already running"):
             backend.submit(job, LIMITS[job.stage])
         backend.cancel(receipt)
 
@@ -323,14 +323,14 @@ def test_manifest_write_failure_leaves_failed_status(prepared, monkeypatch):
 def test_invalid_inputs_do_not_create_attempt(prepared):
     backend, _, job, source = prepared
     wrong = JobRequest(job.task_id, str(uuid4()), Stage.PROFILE_A, "b" * 64)
-    with pytest.raises(ValueError, match="哈希"):
+    with pytest.raises(ValueError, match="hash"):
         backend.prepare(wrong, {"data.csv": source})
     assert not (backend.root / wrong.attempt_id).exists()
-    with pytest.raises(ValueError, match="文件集"):
+    with pytest.raises(ValueError, match="file set"):
         backend.prepare(wrong, {"unexpected.csv": source})
-    with pytest.raises(ValueError, match="资源策略"):
+    with pytest.raises(ValueError, match="resource policy"):
         backend.submit(job, LIMITS[Stage.CLEAN_C])
-    with pytest.raises(ValueError, match="归属"):
+    with pytest.raises(ValueError, match="does not match the job"):
         backend.status(ExecutionReceipt(str(uuid4()), job.attempt_id, f"docker-{job.attempt_id}"))
 
 
@@ -350,12 +350,12 @@ def test_spec_code_and_candidate_bindings_and_failed_d_report(prepared, tmp_path
     assert backend._clean_snapshot_hashes[job.attempt_id] != job.code_sha256
     job = JobRequest(a_job.task_id, str(uuid4()), Stage.VERIFY_D, a_job.input_sha256,
                      spec.spec_sha256, candidate_sha256="b" * 64)
-    with pytest.raises(ValueError, match="候选"):
+    with pytest.raises(ValueError, match="Candidate"):
         backend.prepare(job, {"data.csv": source, "spec.json": spec_path,
                               "candidate.csv": source})
     job = JobRequest(a_job.task_id, str(uuid4()), Stage.VERIFY_D, a_job.input_sha256,
                      "b" * 64, candidate_sha256=a_job.input_sha256)
-    with pytest.raises(ValueError, match="规范"):
+    with pytest.raises(ValueError, match="Specification"):
         backend.prepare(job, {"data.csv": source, "spec.json": spec_path,
                               "candidate.csv": source})
     job = JobRequest(a_job.task_id, str(uuid4()), Stage.VERIFY_D, a_job.input_sha256,
@@ -415,7 +415,7 @@ def test_engine_capabilities_required(tmp_path, capability):
 
 
 def test_drifting_image_tags_rejected(tmp_path):
-    with pytest.raises(ValueError, match="不可变"):
+    with pytest.raises(ValueError, match="immutable"):
         DockerExecutionBackend(tmp_path, dict.fromkeys(Stage, "image:latest"), Client())
 
 
@@ -437,10 +437,10 @@ def test_archive_size_and_member_count():
     with pytest.raises(ValueError):
         archive_file(container, "/output/cleaned.csv", 3)
     container = SimpleNamespace(get_archive=lambda _: ([b"x" * 65541], {}))
-    with pytest.raises(ValueError, match="传输"):
+    with pytest.raises(ValueError, match="transfer"):
         archive_file(container, "/output/cleaned.csv", 4)
     container = SimpleNamespace(get_archive=lambda _: ([b"\0" * 10240], {}))
-    with pytest.raises(ValueError, match="单文件"):
+    with pytest.raises(ValueError, match="single file"):
         archive_file(container, "/output/cleaned.csv", 4)
 
 

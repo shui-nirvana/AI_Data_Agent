@@ -19,7 +19,7 @@ def main() -> None:
         with Path("/input/spec.json").open("rb") as stream:
             content = stream.read(262145)
         if len(content) > 262144:
-            raise ValueError("规范超过大小限制")
+            raise ValueError("Specification exceeds the size limit")
         spec = FrozenSpec.model_validate_json(content)
         report = verify(Path("/input/data.csv"), Path("/input/candidate.csv"), spec)
     except (ValueError, csv.Error, OSError) as exc:

@@ -21,10 +21,10 @@ def system_proxy() -> str | None:
     if enabled == "false":
         return None
     if enabled != "true":
-        raise ModelUnavailableError("Vultr 代理开关只能为 true 或 false")
+        raise ModelUnavailableError("The Vultr proxy setting must be true or false")
     value = getproxies().get("https")
     if not value:
-        raise ModelUnavailableError("已启用 Vultr 代理，但未发现 HTTPS 系统代理")
+        raise ModelUnavailableError("The Vultr proxy is enabled, but no HTTPS system proxy was found")
     value = value if "://" in value else "http://" + value
     try:
         parsed = urlsplit(value)
@@ -35,21 +35,21 @@ def system_proxy() -> str | None:
     except ValueError:
         valid = False
     if not valid:
-        raise ModelUnavailableError("Vultr 只允许无凭据的本地 HTTP 代理")
+        raise ModelUnavailableError("Vultr only permits a local HTTP proxy without credentials")
     return value
 
 
 def load_key_file(path: Path) -> str:
     try:
         if path.is_symlink() or not path.is_file():
-            raise ModelUnavailableError("Vultr 推理密钥文件不存在或不是普通文件")
+            raise ModelUnavailableError("The Vultr inference key file is missing or is not a regular file")
         with path.open("rb") as stream:
             raw = stream.read(4097)
         if len(raw) > 4096:
-            raise ModelUnavailableError("Vultr 推理密钥文件超过大小限制")
+            raise ModelUnavailableError("The Vultr inference key file exceeds the size limit")
         lines = raw.decode("utf-8-sig").splitlines()
     except (OSError, UnicodeError):
-        raise ModelUnavailableError("无法读取 Vultr 推理密钥文件") from None
+        raise ModelUnavailableError("Cannot read the Vultr inference key file") from None
     values = []
     for line in lines:
         line = line.strip()
@@ -57,13 +57,13 @@ def load_key_file(path: Path) -> str:
             continue
         name, separator, value = line.partition("=")
         if not separator or name.strip() != KEY_NAME:
-            raise ModelUnavailableError("Vultr 密钥文件只能包含推理 API Key")
+            raise ModelUnavailableError("The Vultr key file may only contain the inference API key")
         value = value.strip()
         if len(value) >= 2 and value[0] in ("'", '"') and value[-1] == value[0]:
             value = value[1:-1]
         values.append(value)
     if len(values) != 1:
-        raise ModelUnavailableError("Vultr 密钥文件必须包含唯一的推理 API Key")
+        raise ModelUnavailableError("The Vultr key file must contain exactly one inference API key")
     return values[0]
 
 
@@ -71,9 +71,9 @@ class VultrInferenceClient:
     def __init__(self, api_key: str, model: str | None, *, transport=None, proxy=None):
         if (not isinstance(api_key, str) or not api_key or api_key != api_key.strip()
                 or any(ord(c) < 33 or ord(c) > 126 for c in api_key)):
-            raise ModelUnavailableError("Vultr 推理 API Key 缺失或格式无效")
+            raise ModelUnavailableError("The Vultr inference API key is missing or invalid")
         if not isinstance(model, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/-]{0,199}", model):
-            raise ModelUnavailableError("请明确配置有效的 Vultr 推理模型 ID")
+            raise ModelUnavailableError("Configure a valid Vultr inference model ID")
         self._api_key, self.model, self._transport, self._proxy = api_key, model, transport, proxy
 
     @classmethod
@@ -114,7 +114,7 @@ class VultrInferenceClient:
                             content.extend(chunk)
                             if len(content) > 1_000_000:
                                 raise ModelUnavailableError(
-                                    "Vultr Inference 响应超过配额", safe_code="MODEL_RESPONSE_TOO_LARGE")
+                                    "Vultr Inference response exceeds the size limit", safe_code="MODEL_RESPONSE_TOO_LARGE")
             data = json.loads(content)
             if not isinstance(data, dict):
                 raise ValueError()
@@ -152,13 +152,13 @@ class VultrInferenceClient:
             raise
         except (httpx.ConnectTimeout, httpx.ConnectError):
             raise ModelUnavailableError(
-                "Vultr Inference 连接失败；未自动重试", safe_code="MODEL_CONNECT_FAILED") from None
+                "Vultr Inference connection failed; no automatic retry was made", safe_code="MODEL_CONNECT_FAILED") from None
         except (TimeoutError, httpx.TimeoutException):
             raise ModelUnavailableError(
-                "Vultr Inference 调用超时；未自动重试", safe_code="MODEL_TIMEOUT") from None
+                "Vultr Inference timed out; no automatic retry was made", safe_code="MODEL_TIMEOUT") from None
         except httpx.HTTPError:
             raise ModelUnavailableError(
-                "Vultr Inference 传输失败；未自动重试", safe_code="MODEL_TRANSPORT_FAILED") from None
+                "Vultr Inference transport failed; no automatic retry was made", safe_code="MODEL_TRANSPORT_FAILED") from None
         except (KeyError, TypeError, ValueError):
             raise ModelUnavailableError(
-                "Vultr Inference 响应协议无效", safe_code="MODEL_INVALID_RESPONSE") from None
+                "Vultr Inference response format is invalid", safe_code="MODEL_INVALID_RESPONSE") from None

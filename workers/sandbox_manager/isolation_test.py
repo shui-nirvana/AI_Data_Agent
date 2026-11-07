@@ -139,18 +139,18 @@ def run_checks(manifest: Path, output: Path, stress: bool = False) -> Path:
             "target_platform_verified": False,
         }, indent=2), encoding="utf-8")
         if not passed:
-            raise RuntimeError(f"{name} 未通过，证据见 {report_path}")
+            raise RuntimeError(f"{name} failed; see evidence at {report_path}")
     return report_path
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="真实 Docker 开发隔离检查（不是完整安全认证）")
+    parser = argparse.ArgumentParser(description="Real Docker development isolation checks (not a full security certification)")
     parser.add_argument("--images", type=Path, default=Path(".runtime/docker/images.json"))
     parser.add_argument("--output", type=Path, default=Path(".runtime/docker/isolation"))
-    parser.add_argument("--stress", action="store_true", help="主动触发内存限额与墙钟超时")
+    parser.add_argument("--stress", action="store_true", help="Trigger the memory limit and wall-clock timeout")
     args = parser.parse_args()
     report = run_checks(args.images, args.output, args.stress)
-    print(f"所选隔离检查通过；证据：{report}。PID/CPU/取消/崩溃仍需目标机验收。")
+    print(f"Selected isolation checks passed; evidence: {report}. PID, CPU, cancellation and crash behavior still require target-host validation.")
 
 
 if __name__ == "__main__":

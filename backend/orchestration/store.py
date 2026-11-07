@@ -92,7 +92,7 @@ class WorkflowStore:
     def transition(db, task_id: str, state: TaskState):
         row = db.execute("SELECT state FROM tasks WHERE task_id=?", (task_id,)).fetchone()
         if row is None or (row["state"] in TERMINAL and row["state"] != state):
-            raise WorkflowConflict("任务不存在或已结束")
+            raise WorkflowConflict("Task does not exist or has already ended")
         if row["state"] != state:
             db.execute("UPDATE tasks SET state=?, version=version+1 WHERE task_id=?",
                        (state, task_id))
@@ -104,14 +104,14 @@ class WorkflowStore:
             task = db.execute("SELECT * FROM tasks WHERE task_id=? AND owner_id=?",
                               (task_id, owner)).fetchone()
             if task is None:
-                raise WorkflowConflict("任务未找到")
+                raise WorkflowConflict("Task not found")
             flow = db.execute("SELECT task_id FROM workflows WHERE task_id=?", (task_id,)).fetchone()
             if flow:
                 if task["state"] in TERMINAL:
-                    raise WorkflowConflict("任务已结束")
+                    raise WorkflowConflict("Task has already ended")
                 return
             if task["state"] != TaskState.UPLOADED:
-                raise WorkflowConflict("仅能启动已上传任务")
+                raise WorkflowConflict("Only uploaded tasks can be started")
             db.execute("INSERT INTO workflows(task_id) VALUES (?)", (task_id,))
             self.transition(db, task_id, TaskState.QUEUED)
             self.wake(db, task_id, f"start:{task_id}")
@@ -120,19 +120,19 @@ class WorkflowStore:
         with self.db() as db:
             row = db.execute("SELECT * FROM workflows WHERE task_id=?", (task_id,)).fetchone()
         if row is None:
-            raise WorkflowConflict("任务尚未启动编排")
+            raise WorkflowConflict("Task orchestration has not started")
         return dict(row)
 
     def task(self, task_id: str):
         with self.db() as db:
             row = db.execute("SELECT * FROM tasks WHERE task_id=?", (task_id,)).fetchone()
         if row is None:
-            raise WorkflowConflict("任务不存在")
+            raise WorkflowConflict("Task does not exist")
         return dict(row)
 
     def check_active(self, task_id: str):
         if self.task(task_id)["state"] in TERMINAL:
-            raise WorkflowConflict("任务已结束")
+            raise WorkflowConflict("Task has already ended")
 
     def next_event(self):
         with self.db() as db:
@@ -146,7 +146,7 @@ class WorkflowStore:
     def schedule(self, job: JobRequest, sources: dict[str, str], state: TaskState, attempt_no: int = 1):
         """Do not redispatch a replayed node; allow at most three C/D rounds and one A round."""
         if attempt_no not in (1, 2, 3) or (job.stage == "PROFILE_A" and attempt_no != 1):
-            raise WorkflowConflict("作业尝试超出预算")
+            raise WorkflowConflict("Job attempt budget exceeded")
         with self.db() as db:
             existing = db.execute("SELECT * FROM workflow_jobs WHERE task_id=? AND stage=? AND attempt_no=?",
                                   (job.task_id, job.stage, attempt_no)).fetchone()
@@ -182,11 +182,11 @@ class WorkflowStore:
     def finish_job(self, job_id: str, state: str, result_dir: str | None, error_code: str | None,
                    evidence: dict | None = None):
         if state not in ("finished", "failed", "cancelled"):
-            raise ValueError("无效作业状态")
+            raise ValueError("Invalid job status")
         with self.db() as db:
             job = db.execute("SELECT * FROM workflow_jobs WHERE job_id=?", (job_id,)).fetchone()
             if job is None or job["state"] != "running":
-                raise WorkflowConflict("作业已结束或回报过期")
+                raise WorkflowConflict("Job has ended or its report is stale")
             task = db.execute("SELECT state FROM tasks WHERE task_id=?", (job["task_id"],)).fetchone()
             if task["state"] in TERMINAL:
                 state, result_dir = "cancelled", None
@@ -207,21 +207,21 @@ class WorkflowStore:
                               (task_id, owner)).fetchone()
             flow = db.execute("SELECT * FROM workflows WHERE task_id=?", (task_id,)).fetchone()
             if task is None or flow is None or not flow["profile_json"]:
-                raise WorkflowConflict("任务尚未完成 A 检测")
+                raise WorkflowConflict("Task has not completed detection A")
             profile, issues = json.loads(flow["profile_json"]), json.loads(flow["issues_json"])
             spec = freeze_spec(task_id=task_id, input_sha256=task["input_sha256"], owner_id=owner,
                                task_version=version, columns=tuple(profile["columns"]),
                                decisions=decisions, issues=tuple(issues))
             if task["state"] == TaskState.CANCELLED:
-                raise WorkflowConflict("任务已取消")
+                raise WorkflowConflict("Task has been cancelled")
             if flow["spec_json"]:
                 from backend.domain.spec import FrozenSpec
                 previous = FrozenSpec.model_validate_json(flow["spec_json"])
                 if previous != spec:
-                    raise WorkflowConflict("规范已经冻结，不允许修改")
+                    raise WorkflowConflict("The specification is frozen and cannot be modified")
                 return previous
             if task["state"] != TaskState.AWAITING_DECISIONS or task["version"] != version:
-                raise WorkflowConflict("审批状态或版本过期")
+                raise WorkflowConflict("Approval state or version is stale")
             db.execute("UPDATE workflows SET spec_json=? WHERE task_id=?",
                        (spec.model_dump_json(), task_id))
             self.transition(db, task_id, TaskState.SPEC_FROZEN)
@@ -264,39 +264,39 @@ class WorkflowStore:
             task = db.execute("SELECT * FROM tasks WHERE task_id=? AND owner_id=?",
                               (task_id, owner)).fetchone()
             if task is None:
-                raise WorkflowConflict("任务不存在")
+                raise WorkflowConflict("Task does not exist")
             existing = db.execute("SELECT status FROM validation_explanations WHERE task_id=?",
                                   (task_id,)).fetchone()
             if existing:
                 return existing["status"]
             if task["state"] not in (TaskState.SUCCEEDED, TaskState.FAILED):
-                raise WorkflowConflict("任务尚未结束")
+                raise WorkflowConflict("Task has not ended")
             flow = db.execute("SELECT validation_json FROM workflows WHERE task_id=?", (task_id,)).fetchone()
             job = db.execute("""SELECT * FROM workflow_jobs WHERE task_id=? AND stage='VERIFY_D'
                               ORDER BY attempt_no DESC LIMIT 1""", (task_id,)).fetchone()
             if not flow or not job:
-                raise WorkflowConflict("没有可解释的 D 验证报告")
+                raise WorkflowConflict("No D validation report is available to explain")
             if flow["validation_json"] and job["state"] == "finished":
                 report = json.loads(flow["validation_json"])
             elif job["state"] == "failed" and job["error_code"] == "VALIDATION_REJECTED":
                 evidence = json.loads(job["evidence_json"] or "{}")
                 report = evidence.get("validation")
             else:
-                raise WorkflowConflict("没有可解释的 D 验证报告")
+                raise WorkflowConflict("No D validation report is available to explain")
             request = json.loads(job["request_json"])
             if (not isinstance(report, dict) or request.get("task_id") != task_id
                     or request.get("input_sha256") != task["input_sha256"]
                     or report.get("spec_sha256") != request.get("spec_sha256")
                     or report.get("output_sha256") != request.get("candidate_sha256")
                     or report.get("verdict") != ("passed" if job["state"] == "finished" else "rejected")):
-                raise WorkflowConflict("D 验证报告绑定无效")
+                raise WorkflowConflict("The D validation report binding is invalid")
             try:
                 facts = validation_facts(report)
             except ValueError as exc:
-                raise WorkflowConflict("D 验证报告无效") from exc
+                raise WorkflowConflict("The D validation report is invalid") from exc
             input_match = report.get("input_sha256") == request["input_sha256"]
             if facts["checks"][0]["passed"] != input_match:
-                raise WorkflowConflict("D 验证报告绑定无效")
+                raise WorkflowConflict("The D validation report binding is invalid")
             db.execute("INSERT INTO validation_explanations(task_id,status,facts_json) VALUES(?,?,?)",
                        (task_id, "pending", json.dumps(facts, ensure_ascii=True)))
             self.wake(db, task_id, f"explain:{task_id}")
@@ -346,7 +346,7 @@ class WorkflowStore:
                            error_code='EXPLANATION_CALL_UNCERTAIN' WHERE task_id=?""", (task_id,))
                 return None
             if row["status"] != "pending":
-                raise WorkflowConflict("解释请求状态无效")
+                raise WorkflowConflict("Invalid explanation request state")
             db.execute("UPDATE validation_explanations SET status='started' WHERE task_id=?", (task_id,))
             return json.loads(row["facts_json"])
 
@@ -358,7 +358,7 @@ class WorkflowStore:
                                   json.dumps(result, ensure_ascii=True) if result is not None else None,
                                   error_code, task_id))
             if updated.rowcount != 1:
-                raise WorkflowConflict("解释请求状态过期")
+                raise WorkflowConflict("Explanation request state is stale")
 
     def fail(self, task_id: str, code: str):
         with self.db() as db:

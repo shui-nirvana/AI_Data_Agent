@@ -13,17 +13,24 @@ def test_page_discloses_goal_and_repair_data_boundaries(tmp_path):
     html = response.text
     assert 'aria-describedby="goal-help"' in html
     assert 'id="goal-help"' in html
-    assert "业务目标目前仅作为任务描述保存，不会自动转换成清洗规则" in html
-    assert "请在后续审批中逐列选择并确认清洗动作和参数" in html
-    assert "自愈时还会发送失败作业刚刚实际执行的完整源码" in html
-    assert "执行源码可能与模型原始输出不同" in html
-    assert "若执行源码中包含这些内容或其他敏感信息，也会随源码一起发送" in html
-    assert "本次解释请求只发送" in html
-    assert "清洗生成与自愈的外发范围见上方隐私说明" in html
-    assert "不提供多用户隔离" in html
-    assert "共享屏幕或截图前请检查内容" in html
+    assert "The business goal is saved only as a task description" in html
+    assert "Select and confirm actions and parameters for each column during review" in html
+    assert "Repair also sends the complete source actually executed by the failed job" in " ".join(html.split())
+    assert "that source may differ from the model's original output" in html
+    assert "sensitive details will be sent if they appear in the executed source" in html
+    assert "This explanation request sends only the D verdict" in html
+    assert "See the privacy notice above for code generation and repair" in html
+    assert "There is no multi-user isolation" in html
+    assert "sharing your screen or screenshots" in html
     assert html.index('id="explanation-section"') < html.index('id="evidence"')
     assert '<details>' in html
+    assert 'id="upload-form" novalidate' in html
+    assert 'id="review-form" novalidate' in html
+    assert 'id="upload-error" class="form-error" role="alert"' in html
+    assert 'id="review-error" class="form-error" role="alert"' in html
+    assert "Choose file" in html and "No file selected" in html
+    assert "Sandboxed CSV Cleaning" in html
+    assert "hackathon" not in html.lower()
 
 
 def test_sensitive_responses_are_not_cached_even_on_errors(tmp_path):

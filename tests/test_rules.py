@@ -97,13 +97,13 @@ def test_spec_is_hash_bound_and_nested_immutable(golden):
 
 def test_requires_complete_current_owner_decisions(golden):
     _, _, _, _, arguments, _ = golden
-    with pytest.raises(ValueError, match="完整裁决"):
+    with pytest.raises(ValueError, match="All task issues must be decided"):
         freeze_spec(**{**arguments, "decisions": arguments["decisions"][:-1]})
-    with pytest.raises(ValidationError, match="身份或任务版本"):
+    with pytest.raises(ValidationError, match="identity or task version"):
         freeze_spec(**{**arguments, "owner_id": "another-owner"})
-    with pytest.raises(ValidationError, match="身份或任务版本"):
+    with pytest.raises(ValidationError, match="identity or task version"):
         freeze_spec(**{**arguments, "task_version": 2})
-    with pytest.raises(ValueError, match="输入哈希"):
+    with pytest.raises(ValueError, match="input hash"):
         freeze_spec(**{**arguments, "input_sha256": "b" * 64})
 
 
@@ -157,7 +157,7 @@ def test_rejects_all_columns_written_and_unknown_action(tmp_path):
         predicate_id="parseable_nonstandard_date",
         params=ActionParams(input_formats=("YYYY/MM/DD",)), actor_id="demo", task_version=1,
     )
-    with pytest.raises(ValidationError, match="保留一个"):
+    with pytest.raises(ValidationError, match="one unchanged column"):
         freeze_spec(
             task_id=str(uuid4()), input_sha256=profile["input_sha256"], owner_id="demo",
             task_version=1, columns=("date",), decisions=(decision,), issues=tuple(issues),
@@ -172,9 +172,9 @@ def test_bounded_parser_and_bom(tmp_path):
     table = read_csv(source)
     assert table.columns == ("id", "name")
     assert table.rows == (("1", "a\r\nb"),)
-    with pytest.raises(ValueError, match="字节"):
+    with pytest.raises(ValueError, match="byte"):
         read_csv(source, CSV_POLICY.model_copy(update={"max_bytes": 1}))
-    with pytest.raises(ValueError, match="单元格"):
+    with pytest.raises(ValueError, match="cell"):
         read_csv(source, CSV_POLICY.model_copy(update={"max_cells": 1}))
 
 

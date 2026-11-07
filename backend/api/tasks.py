@@ -55,13 +55,13 @@ def task_router(store: TaskStore, inputs: InputFiles, token: str, max_bytes: int
     def authenticate(provided: str | None) -> None:
         """Perform simple demo authentication."""
         if provided is None or not hmac.compare_digest(token, provided):
-            raise HTTPException(401, "无效的演示令牌")
+            raise HTTPException(401, "Invalid demo token")
 
     def owned(task_id: str):
         """Ensure the task exists and belongs to the current owner."""
         task = store.get(task_id, owner)
         if task is None:
-            raise HTTPException(404, "任务未找到")
+            raise HTTPException(404, "Task not found")
         return task
 
     @router.post("")
@@ -86,20 +86,20 @@ def task_router(store: TaskStore, inputs: InputFiles, token: str, max_bytes: int
         try:
             goal = unquote(x_task_goal or "", encoding="utf-8", errors="strict").strip()
         except UnicodeDecodeError as exc:
-            raise HTTPException(400, "目标编码无效") from exc
+            raise HTTPException(400, "Invalid goal encoding") from exc
             
         if not goal or len(goal) > 500:
-            raise HTTPException(400, "目标必须在 1-500 个字符之间")
+            raise HTTPException(400, "The goal must contain 1 to 500 characters")
             
         # Validate the content type.
         content_type = request.headers.get("content-type", "").split(";")[0].strip()
         if content_type not in ("text/csv", "application/octet-stream"):
-            raise HTTPException(415, "请上传原始 CSV 请求体")
+            raise HTTPException(415, "Upload a raw CSV request body")
             
         # Check the declared length.
         length = request.headers.get("content-length")
         if length is not None and (not length.isdigit() or int(length) > max_bytes):
-            raise HTTPException(413, "CSV 超过上传限制")
+            raise HTTPException(413, "CSV exceeds the upload limit")
 
         task_id = str(uuid4())
         temporary = inputs.temporary_path(task_id)
@@ -113,14 +113,14 @@ def task_router(store: TaskStore, inputs: InputFiles, token: str, max_bytes: int
                 async for chunk in request.stream():
                     size += len(chunk)
                     if size > max_bytes:
-                        raise HTTPException(413, "CSV 超过上传限制")
+                        raise HTTPException(413, "CSV exceeds the upload limit")
                     digest.update(chunk)
                     output.write(chunk)
                 output.flush()
                 os.fsync(output.fileno()) # Flush the file to disk.
                 
             if size == 0:
-                raise HTTPException(400, "CSV 为空")
+                raise HTTPException(400, "CSV is empty")
                 
             # Move the completed file to the input directory and record it.
             os.replace(temporary, destination)
@@ -149,7 +149,7 @@ def task_router(store: TaskStore, inputs: InputFiles, token: str, max_bytes: int
         authenticate(x_demo_token)
         owned(task_id)
         if after < 0:
-            raise HTTPException(400, "游标必须为非负数")
+            raise HTTPException(400, "Cursor must be non-negative")
         return {"events": [asdict(event) for event in store.events(task_id, after)]}
 
     @router.post("/{task_id}/cancel")
@@ -158,7 +158,7 @@ def task_router(store: TaskStore, inputs: InputFiles, token: str, max_bytes: int
         authenticate(x_demo_token)
         task = store.cancel(task_id, owner)
         if task is None:
-            raise HTTPException(404, "任务未找到")
+            raise HTTPException(404, "Task not found")
         return asdict(task)
 
     @router.post("/{task_id}/start", status_code=202)
@@ -179,7 +179,7 @@ def task_router(store: TaskStore, inputs: InputFiles, token: str, max_bytes: int
         try:
             flow = workflow.flow(task_id)
             if not flow["profile_json"]:
-                raise WorkflowConflict("A 检测尚未完成")
+                raise WorkflowConflict("Detection A has not completed")
         except WorkflowConflict as exc:
             raise HTTPException(409, str(exc)) from exc
         import json
@@ -194,14 +194,14 @@ def task_router(store: TaskStore, inputs: InputFiles, token: str, max_bytes: int
         try:
             flow = workflow.flow(task_id)
             if not flow["profile_json"]:
-                raise WorkflowConflict("A 检测尚未完成")
+                raise WorkflowConflict("Detection A has not completed")
         except WorkflowConflict as exc:
             raise HTTPException(409, str(exc)) from exc
         content = bytearray()
         async for chunk in request.stream():
             content.extend(chunk)
             if len(content) > 262144:
-                raise HTTPException(413, "审批请求超过大小限制")
+                raise HTTPException(413, "Approval request exceeds the size limit")
         try:
             submission = ApprovalSubmission.model_validate_json(bytes(content))
             choices = tuple(Decision(**choice.model_dump(), actor_id=owner,
@@ -211,7 +211,7 @@ def task_router(store: TaskStore, inputs: InputFiles, token: str, max_bytes: int
         except WorkflowConflict as exc:
             raise HTTPException(409, str(exc)) from exc
         except ValueError as exc:
-            raise HTTPException(422, "审批参数或裁决集合无效") from exc
+            raise HTTPException(422, "Invalid approval parameters or decision set") from exc
         return {"task": asdict(owned(task_id)), "spec_sha256": spec.spec_sha256}
 
     @router.get("/{task_id}/artifacts/{artifact_id}")

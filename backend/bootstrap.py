@@ -27,9 +27,9 @@ def build_dependencies(
     """
     settings = settings if settings is not None else IntegrationSettings.from_environment()
     if settings.execution_backend != "disabled" and execution is None:
-        raise ValueError("配置的执行适配器尚未实现或注入")
+        raise ValueError("The configured execution adapter is not implemented or injected")
     if settings.llm_provider != "disabled" and model_client is None:
-        raise ValueError("配置的模型适配器尚未实现或注入")
+        raise ValueError("The configured model adapter is not implemented or injected")
     return ApplicationDependencies(
         settings=settings,
         execution=execution if execution is not None else DisabledExecutionBackend(),
@@ -44,9 +44,9 @@ def build_generator(root: Path, settings: IntegrationSettings | None = None):
     if settings.llm_provider == "disabled":
         return UnconfiguredGenerator()
     if settings.llm_provider not in ("deepseek", "vultr"):
-        raise ValueError("模型提供方未实现，不自动切换")
+        raise ValueError("The model provider is not implemented; no automatic fallback is allowed")
     if __import__("os").environ.get("AI_AGENT_LLM_ALLOW_EXTERNAL") != "true":
-        raise ValueError("请显式授权 AI_AGENT_LLM_ALLOW_EXTERNAL=true（包括修复时的执行源码）")
+        raise ValueError("Explicitly authorize AI_AGENT_LLM_ALLOW_EXTERNAL=true, including executed source during repair")
     if settings.llm_provider == "deepseek":
         from backend.llm.deepseek import DeepSeekClient
         client = DeepSeekClient.from_environment(settings.llm_model)

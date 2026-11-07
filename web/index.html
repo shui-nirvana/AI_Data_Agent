@@ -1,144 +1,157 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>AI Data Agent | 本地清洗工作台</title>
+    <title>AI Data Agent | Data Cleaning Workspace</title>
     <!-- Basic styles. -->
     <link rel="stylesheet" href="/style.css" />
   </head>
   <body>
     <main>
       <header>
-        <!-- Hackathon context. -->
-        <span class="eyebrow">Vultr Hackathon / Implementation Scaffold</span>
+        <!-- Project context. -->
+        <span class="eyebrow">Sandboxed CSV Cleaning</span>
         <h1>AI Data Agent</h1>
         <p>
-          固定工具检测、人工审批、模型编写源码、隔离执行与独立验证。 需要独立
-          Graph Runner 和 Docker worker；模型由服务端配置。
+          Fixed-tool detection, human approval, model-generated code, isolated execution and independent validation.
+          A separate Graph Runner and Docker worker are required; the model is configured on the server.
         </p>
       </header>
 
       <!-- Task creation. -->
       <section aria-labelledby="upload-heading">
-        <h2 id="upload-heading">创建任务</h2>
-        <form id="upload-form">
+        <h2 id="upload-heading">Create a task</h2>
+        <form id="upload-form" novalidate>
           <!-- Authentication token. -->
-          <label for="token">演示访问令牌</label>
+          <label for="token">Demo access token</label>
           <input
             id="token"
             type="password"
             required
             autocomplete="off"
-            placeholder="与服务端配置一致"
+            placeholder="Token configured on the server"
           />
 
           <!-- Business goal. -->
-          <label for="goal">业务目标</label>
+          <label for="goal">Business goal</label>
           <textarea
             id="goal"
             required
             maxlength="500"
             rows="3"
             aria-describedby="goal-help"
-            placeholder="例如：规范明确格式的日期，保留退款记录"
+            placeholder="For example: normalize specified date formats and preserve refund records"
           ></textarea>
           <p id="goal-help" class="note">
-            业务目标目前仅作为任务描述保存，不会自动转换成清洗规则，也不会直接发送给模型。
-            请在后续审批中逐列选择并确认清洗动作和参数。
+            The business goal is saved only as a task description. It is not automatically converted into cleaning
+            rules or sent directly to the model. Select and confirm actions and parameters for each column during review.
           </p>
 
           <!-- File selection. -->
-          <label for="file">CSV 文件</label>
-          <input id="file" type="file" accept=".csv,text/csv" required />
+          <label for="file">CSV file</label>
+          <div class="file-picker">
+            <input id="file" class="file-input" type="file" accept=".csv,text/csv"
+              aria-describedby="file-name" required />
+            <label for="file" class="file-button">Choose file</label>
+            <span id="file-name" aria-live="polite">No file selected</span>
+          </div>
 
-          <button type="submit">上传并登记</button>
+          <button type="submit">Upload and register</button>
+          <p id="upload-error" class="form-error" role="alert"></p>
         </form>
         <p class="note">
-          仅用于本地非敏感演示数据。当前接口使用原始 CSV 请求体；API 不解析 CSV
-          或执行代码，上传本身不会自动启动作业。
+          Use only non-sensitive demonstration data. The API accepts a raw CSV request body; it does not parse the CSV
+          or execute code, and uploading alone does not start a job.
         </p>
         <details>
-          <summary>隐私与演示访问限制</summary>
+          <summary>Privacy and demo access limitations</summary>
           <p>
-            当前为单用户演示：共享令牌的所有使用者均可访问同一所有者的任务，不提供多用户隔离。
-            页面可能显示业务目标、真实列名和数值范围；共享屏幕或截图前请检查内容。
+            This is a single-user demo: everyone sharing a token can access the same owner's tasks.
+            There is no multi-user isolation. The page may display business goals, real column names and numeric
+            ranges; check the content before sharing your screen or screenshots.
           </p>
           <p>
-            清洗生成会发送匿名列索引、获批规则摘要及聚合统计。自愈时还会发送失败作业刚刚实际执行的完整源码及受限诊断，执行源码可能与模型原始输出不同。
-            系统不主动将原始 CSV 行、真实列名、填充值或原始异常消息与堆栈作为独立数据发送；
-            但若执行源码中包含这些内容或其他敏感信息，也会随源码一起发送。
+            Code generation sends anonymized column indexes, approved rule summaries and aggregate statistics.
+            Repair also sends the complete source actually executed by the failed job and limited diagnostics;
+            that source may differ from the model's original output. The system does not separately send raw CSV
+            rows, real column names, fill values, raw exception messages or stack traces. However, these or other
+            sensitive details will be sent if they appear in the executed source.
           </p>
         </details>
       </section>
 
       <!-- Task status. -->
       <section aria-labelledby="status-heading">
-        <h2 id="status-heading">任务状态</h2>
-        <p id="status" role="status" aria-live="polite">尚未创建任务。</p>
+        <h2 id="status-heading">Task status</h2>
+        <p id="status" role="status" aria-live="polite">No task created yet.</p>
         <!-- Refresh becomes available after task creation. -->
-        <button id="refresh" type="button" hidden>刷新状态</button>
-        <button id="start" type="button" hidden>启动固定检测</button>
-        <button id="cancel" type="button" hidden>取消任务</button>
-        <label for="restore-id">恢复已有任务 ID（不保存访问令牌）</label>
+        <button id="refresh" type="button" hidden>Refresh status</button>
+        <button id="start" type="button" hidden>Start fixed detection</button>
+        <button id="cancel" type="button" hidden>Cancel task</button>
+        <label for="restore-id">Restore task ID (the access token is not saved)</label>
         <input id="restore-id" type="text" autocomplete="off" />
-        <button id="restore" type="button">加载任务</button>
-        <h3>处理阶段</h3>
+        <button id="restore" type="button">Load task</button>
+        <h3>Processing stages</h3>
         <p class="note">
-          根据已加载的状态事件和作业证据汇总；具体原因请查看下方原始证据。
+          Summarized from loaded status events and job evidence; inspect the raw evidence below for details.
         </p>
-        <ol id="progress-list" aria-label="处理阶段" aria-live="polite"></ol>
+        <ol id="progress-list" aria-label="Processing stages" aria-live="polite"></ol>
         <details>
-          <summary>查看任务元数据（可能包含业务目标）</summary>
-          <pre id="details" aria-label="任务元数据"></pre>
+          <summary>View task metadata (may include the business goal)</summary>
+          <pre id="details" aria-label="Task metadata"></pre>
         </details>
       </section>
       <section id="evidence-section" hidden>
-        <h2>执行与验证结果</h2>
+        <h2>Execution and validation results</h2>
         <div id="explanation-section" hidden>
-          <h3>模型辅助解释 D 验证</h3>
+          <h3>Model-assisted explanation of validation D</h3>
           <p class="note">
-            按需调用一次模型，可能产生额外费用。本次解释请求只发送 D 结论、固定检查状态和已完成的逐格统计，
-            不发送原始 CSV、列名、填充值或执行源码；清洗生成与自愈的外发范围见上方隐私说明。
-            模型选择说明顺序和风格，系统填入 D 的事实；解释不会改变验证结论或下载权限。
+            An on-demand model call may incur additional charges. This explanation request sends only the D verdict,
+            fixed check statuses and completed cell-by-cell statistics, not raw CSV data, column names, fill values
+            or executed source. See the privacy notice above for code generation and repair. The model chooses the
+            order and style; the system supplies D's facts. The explanation cannot change the verdict or download access.
           </p>
-          <button id="explain" type="button">生成验证解释</button>
+          <button id="explain" type="button">Generate validation explanation</button>
           <p id="explanation-status" role="status" aria-live="polite"></p>
-          <div id="explanation-text" aria-label="模型辅助验证解释"></div>
+          <div id="explanation-text" aria-label="Model-assisted validation explanation"></div>
         </div>
         <div id="downloads"></div>
         <p class="note">
-          下载 CSV 可能保留原有电子表格公式，使用电子表格打开前请确认风险。
+          Downloaded CSV files may retain spreadsheet formulas. Review the risk before opening them in a spreadsheet.
         </p>
         <details>
-          <summary>查看状态事件与原始证据</summary>
+          <summary>View status events and raw evidence</summary>
           <p class="note">
-            人工测试源码、模拟模型与真实模型分别标记；token
-            不等于货币费用。容器共享内核，本页面不代表生产安全认证。
+            Manual test source, mock models and real models are labeled separately; tokens are not a monetary cost.
+            Containers share the host kernel; this page is not a production security certification.
           </p>
-          <pre id="events" aria-label="状态事件"></pre>
-          <pre id="evidence" aria-label="作业尝试与模型证据"></pre>
+          <pre id="events" aria-label="Status events"></pre>
+          <pre id="evidence" aria-label="Job attempts and model evidence"></pre>
         </details>
       </section>
       <section id="review-section" hidden>
-        <h2>固定检测与人工裁决</h2>
+        <h2>Fixed detection and human decisions</h2>
         <p>
-          检测事实不是修改授权。每列只选一个动作；至少保留一列，不删除、去重或重排行。日期只按选定格式转换，不合法值原样保留。
+          Detection does not authorize changes. Choose one action per column and preserve at least one column.
+          Rows are not deleted, deduplicated or reordered. Dates are converted only from selected formats; invalid values are preserved.
         </p>
         <details>
-          <summary>查看固定工具画像（包含列名和数值范围）</summary>
-          <pre id="profile" aria-label="固定工具画像"></pre>
+          <summary>View the fixed-tool profile (includes column names and numeric ranges)</summary>
+          <pre id="profile" aria-label="Fixed-tool profile"></pre>
         </details>
-        <form id="review-form">
+        <form id="review-form" novalidate>
           <div id="decisions"></div>
           <label
             ><input id="consent" type="checkbox" required />
-            确认以上逐列裁决，并同意配置的模型服务接收匿名列索引、获批规则摘要及聚合统计。
-            自愈时还会发送失败作业刚刚实际执行的完整源码及受限诊断，执行源码可能与模型原始输出不同。
-            系统不主动将原始 CSV 行、真实列名、填充值或原始异常消息与堆栈作为独立数据发送；
-            但若执行源码中包含这些内容或其他敏感信息，也会随源码一起发送。</label
+            Confirm the decisions above and consent to sending anonymized column indexes, approved rule summaries
+            and aggregate statistics to the configured model service. Repair also sends the complete source actually
+            executed by the failed job and limited diagnostics; that source may differ from the model's original output.
+            Raw CSV rows, real column names, fill values, raw exception messages and stack traces are not separately
+            sent, but they or other sensitive details will be sent if they appear in the executed source.</label
           >
-          <button id="approve" type="submit">提交并冻结审批</button>
+          <button id="approve" type="submit">Submit and freeze approval</button>
+          <p id="review-error" class="form-error" role="alert"></p>
         </form>
       </section>
     </main>

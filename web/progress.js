@@ -36,97 +36,97 @@ function summarizeProgress(task, events, evidence) {
   const steps = [
     {
       id: "upload",
-      label: "上传登记",
-      status: "已完成",
-      detail: "原始文件已登记；尚未代表检测通过。",
+      label: "Upload",
+      status: "Complete",
+      detail: "The original file is registered; detection has not necessarily passed.",
     },
     {
       id: "profile",
-      label: "固定检测 A",
-      status: "等待中",
-      detail: "检查 CSV 结构并运行固定工具。",
+      label: "Fixed detection A",
+      status: "Waiting",
+      detail: "Check the CSV structure and run fixed tools.",
     },
     {
       id: "approval",
-      label: "人工审批",
-      status: "等待中",
-      detail: "由你逐列选择并冻结规则。",
+      label: "Human approval",
+      status: "Waiting",
+      detail: "Select and freeze rules for each column.",
     },
     {
       id: "generate",
-      label: "模型生成",
-      status: "等待中",
-      detail: "获准修改后生成完整源码。",
+      label: "Model generation",
+      status: "Waiting",
+      detail: "Generate complete source after modifications are approved.",
     },
     {
       id: "execute",
-      label: "隔离执行 C",
-      status: "等待中",
-      detail: "在新容器执行；允许的实现故障可有限修复。",
+      label: "Isolated execution C",
+      status: "Waiting",
+      detail: "Run in a new container; eligible implementation failures may be repaired within limits.",
     },
     {
       id: "validate",
-      label: "独立验证 D",
-      status: "等待中",
-      detail: "独立核对原件、规范与候选结果。",
+      label: "Independent validation D",
+      status: "Waiting",
+      detail: "Independently compare the original, specification and candidate.",
     },
     {
       id: "publish",
-      label: "发布下载",
-      status: "等待中",
-      detail: "复核并登记产物后才可下载。",
+      label: "Publish downloads",
+      status: "Waiting",
+      detail: "Artifacts can be downloaded only after review and registration.",
     },
   ];
   const item = (id) => steps.find((step) => step.id === id);
 
-  if (laterThanProfile) item("profile").status = "已完成";
-  else if (task.state === "QUEUED") item("profile").status = "等待调度";
-  else if (task.state === "PROFILING") item("profile").status = "进行中";
-  if (approvalDone) item("approval").status = "已完成";
+  if (laterThanProfile) item("profile").status = "Complete";
+  else if (task.state === "QUEUED") item("profile").status = "Queued";
+  else if (task.state === "PROFILING") item("profile").status = "In progress";
+  if (approvalDone) item("approval").status = "Complete";
   else if (task.state === "AWAITING_DECISIONS")
-    item("approval").status = "等待你的审批";
+    item("approval").status = "Awaiting your approval";
 
   if (preserveOnly) {
-    item("generate").status = "已跳过";
-    item("generate").detail = "全部保留，无需调用模型。";
-    item("execute").status = "已跳过";
-    item("execute").detail = "全部保留，无需运行清洗代码。";
+    item("generate").status = "Skipped";
+    item("generate").detail = "All columns are preserved; no model call is required.";
+    item("execute").status = "Skipped";
+    item("execute").detail = "All columns are preserved; no cleaning code is required.";
   } else {
     if (codes.length) {
-      item("generate").status = "已完成";
+      item("generate").status = "Complete";
       item("generate").detail =
-        `已记录 ${codes.length} 个代码版本，详细信息见下方证据。`;
-    } else if (task.state === "GENERATING") item("generate").status = "进行中";
+        `${codes.length} code version(s) recorded; see the evidence below.`;
+    } else if (task.state === "GENERATING") item("generate").status = "In progress";
     if (lastClean && lastClean.state === "finished") {
-      item("execute").status = "已完成";
+      item("execute").status = "Complete";
       item("execute").detail =
-        `已记录 ${cleaning.length} 次 C 尝试，独立验证仍需通过。`;
+        `${cleaning.length} C attempt(s) recorded; independent validation is still required.`;
     } else if (task.state === "REPAIRING") {
-      item("execute").status = "修复中";
+      item("execute").status = "Repairing";
       item("execute").detail =
-        "正在按允许的错误类型生成新源码，下一次 C 使用新容器。";
-    } else if (task.state === "EXECUTING") item("execute").status = "进行中";
+        "Generating new source for an eligible failure; the next C attempt uses a new container.";
+    } else if (task.state === "EXECUTING") item("execute").status = "In progress";
   }
   if (report && report.verdict === "passed") {
-    item("validate").status = "已完成";
+    item("validate").status = "Complete";
     item("validate").detail =
-      `D 通过；修改单元格 ${report.changed_cells}，不匹配 ${report.mismatch_count}。`;
-  } else if (task.state === "VALIDATING") item("validate").status = "进行中";
+      `D passed; ${report.changed_cells} changed cells, ${report.mismatch_count} mismatches.`;
+  } else if (task.state === "VALIDATING") item("validate").status = "In progress";
   if (task.state === "SUCCEEDED") {
-    item("publish").status = "已完成";
-    item("publish").detail = "已登记可下载产物；下载时再次核对哈希。";
+    item("publish").status = "Complete";
+    item("publish").detail = "Downloadable artifacts are registered and checked again on download.";
   } else if (task.state === "VALIDATED" || task.state === "PUBLISHING") {
-    item("publish").status = "进行中";
+    item("publish").status = "In progress";
   }
 
   if (task.state === "FAILED" || task.state === "CANCELLED") {
     if (!states.includes(task.state)) {
       steps.push({
         id: "diagnosis",
-        label: "终态定位",
-        status: "待确认",
+        label: "Terminal state diagnosis",
+        status: "Unconfirmed",
         detail:
-          "当前事件尚未加载到终态，请继续刷新并查看完整事件，暂不推断失败位置。",
+          "The terminal event is not loaded yet; refresh and inspect all events before inferring the failure location.",
       });
       return steps;
     }
@@ -148,19 +148,19 @@ function summarizeProgress(task, events, evidence) {
       .find((state) => state.startsWith("ERROR:"));
     if (last) {
       const target = item(location[last]);
-      target.status = task.state === "FAILED" ? "失败" : "已取消";
+      target.status = task.state === "FAILED" ? "Failed" : "Cancelled";
       target.detail =
         task.state === "FAILED"
-          ? `最后记录阶段：${last}${error ? `；${error}` : ""}。${last === "SPEC_FROZEN" ? "具体后续步骤尚不能确定。" : ""}请查看下方事件与作业证据。`
-          : `任务在 ${last} 后取消。`;
+          ? `Last recorded stage: ${last}${error ? `; ${error}` : ""}. ${last === "SPEC_FROZEN" ? "The subsequent step is not yet known. " : ""}See events and job evidence below.`
+          : `Task cancelled after ${last}.`;
       if (last === "SPEC_FROZEN" && task.state === "FAILED")
-        target.status = "后续步骤失败";
+        target.status = "A subsequent step failed";
     } else {
       steps.push({
         id: "diagnosis",
-        label: "终态定位",
-        status: "待确认",
-        detail: "现有状态不足以确定步骤，请查看事件与作业证据。",
+        label: "Terminal state diagnosis",
+        status: "Unconfirmed",
+        detail: "The available state does not identify a step; inspect events and job evidence.",
       });
     }
   }
