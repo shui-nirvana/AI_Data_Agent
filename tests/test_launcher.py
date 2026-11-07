@@ -321,6 +321,7 @@ def test_bundle_includes_launcher_and_excludes_user_csv(tmp_path):
         names = set(archive.namelist())
         archive.extractall(tmp_path / "unpacked")
     assert "start.py" in names
+    assert "start_linux.py" in names
     assert ".dockerignore" in names
     assert "web/progress.js" in names
     assert "backend/llm/validation_explanation.py" in names
@@ -329,6 +330,7 @@ def test_bundle_includes_launcher_and_excludes_user_csv(tmp_path):
     assert "docs/security.md" in names
     assert "docs/submission.md" not in names
     assert "deploy/Dockerfile.job" in names
+    assert "deploy/nginx.conf.example" in names
     assert "deploy/README.md" not in names
     assert "本地闭环手动验证手册.md" not in names
     assert ".env.deepseek" not in names

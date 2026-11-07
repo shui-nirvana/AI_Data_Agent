@@ -12,7 +12,8 @@ def bundle_sources(root: Path, target: Path, manifest: dict) -> None:
     """Package allowlisted source while excluding credentials, task data, caches, Git, and user CSVs."""
     roots = ("backend", "workers", "images", "web")
     files = [root / name for name in (
-        "pyproject.toml", "README.md", "LICENSE", ".env.example", ".dockerignore", "start.py"
+        "pyproject.toml", "README.md", "LICENSE", ".env.example", ".dockerignore", "start.py",
+        "start_linux.py"
     ) if (root / name).is_file()]
     for name in roots:
         files.extend(path for path in (root / name).rglob("*")
@@ -21,7 +22,9 @@ def bundle_sources(root: Path, target: Path, manifest: dict) -> None:
     files.extend(root / "docs" / name for name in (
         "architecture.md", "security.md", "operations.md", "testing.md"
     ) if (root / "docs" / name).is_file())
-    files.extend(path for path in (root / "deploy").glob("Dockerfile.job") if path.is_file())
+    files.extend(root / "deploy" / name for name in (
+        "Dockerfile.job", "nginx.conf.example"
+    ) if (root / "deploy" / name).is_file())
     files.extend(path for path in (root / "deploy").glob("*")
                  if path.suffix in (".lock", ".in"))
     with zipfile.ZipFile(target, "w", compression=zipfile.ZIP_DEFLATED) as archive:

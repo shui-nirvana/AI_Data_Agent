@@ -16,6 +16,6 @@ An optional validation explanation sends only allowlisted D verdict, check state
 
 ## Operational Gaps
 
-The default upload limit is 10 MiB, with an active-task cap and minimum free-disk check. The system limits sandbox resources and model calls, but has no HTTP request rate limiting or account-wide monetary spending cap. Operators must monitor provider billing and disk capacity. A public deployment would also need real authentication, network controls and separate security review.
+The default upload limit is 10 MiB, with an active-task cap and minimum free-disk check. An optional Nginx template adds per-IP request and connection limits when explicitly installed; the application itself has no HTTP rate limiting. These limits are not account-wide quotas and can affect users sharing an IP address. The system limits sandbox resources and model calls, but has no account-wide monetary spending cap. Operators must monitor provider billing and disk capacity. A public deployment would also need real authentication, network controls and separate security review.
 
 The UI may show business goals, actual column names and value ranges. Review screen sharing and screenshots. CSV exports can retain spreadsheet formulas; review them before opening in spreadsheet software. Backups, runtime files, test evidence, and model responses may contain sensitive material and must be protected.

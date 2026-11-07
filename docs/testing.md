@@ -12,6 +12,17 @@ python -m pytest tests/test_local_safety_docker.py tests/test_workflow_docker.py
 
 The default suite does not require a paid model call. Tests can use synthetic inputs and test generators; those are not evidence of live model behavior.
 
+## Reverse Proxy
+
+The optional Nginx integration test starts disposable Nginx and mock upstream containers, creates a short-lived self-signed test certificate, and exercises TLS, redirects, forwarding, upload limits, rate limits and upstream failure. It does not validate the deployed VM, production certificate, public firewall, or the complete application workflow. Install the Docker optional dependency and make the `nginx:1.27-alpine` and `python:3.12-slim` images available locally before opting in:
+
+```powershell
+$env:AI_AGENT_RUN_PROXY_TESTS = "1"
+python -m pytest tests/test_reverse_proxy.py -q
+```
+
+This test does not call a model. The corresponding API authentication and task tests run separately.
+
 ## Observed Live Runs
 
 On November 6, 2026, local Docker with Vultr Serverless Inference and `deepseek-v4.1-flash-1017` completed one normal and one controlled repair workflow using a 50,000-row synthetic CSV. Each ended successfully; independent D reported 20,000 changed cells and zero mismatches. In the controlled repair run, the first generated source was copied and a fixed exception injected; the production implementation handled diagnosis, repair, execution and D. The repair request's previous source matched the source actually executed by the failed job.

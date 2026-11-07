@@ -37,11 +37,13 @@ python start.py stop
 
 The readiness check does not prove that Docker, the model, or the full workflow is healthy. See [operations](docs/operations.md) for model configuration and recovery. Initial setup and image builds need network access; jobs run without network access.
 
+A separate `python3 start_linux.py` foreground launcher is available for Linux. The launcher and dependency lock have not yet been accepted on a Vultr VM; see [operations](docs/operations.md) before using it.
+
 ## Privacy And Limits
 
 External model requests require explicit consent and may incur charges. Generation sends anonymized column indices, approved rule summaries and aggregate statistics. Repair also sends the complete source actually executed by the failing job and limited diagnostics. Raw rows, real column names, literal fill values and raw exceptions or stacks are not deliberately sent as separate data, but anything present in the source is sent with it. Do not use sensitive data or expose this demo publicly.
 
-Docker containers share the host kernel; sandboxing is not a security certification. The demo uses a shared token, not multi-user isolation. Upload, active-task and sandbox resource limits exist, but HTTP rate limiting and an account-level monetary budget are not implemented. Spreadsheet formulas may remain in exported CSVs. See [security](docs/security.md).
+Docker containers share the host kernel; sandboxing is not a security certification. The demo uses a shared token, not multi-user isolation. Upload, active-task and sandbox resource limits exist. An optional Nginx template provides per-IP request limits when deployed; there is no account-level monetary budget. Spreadsheet formulas may remain in exported CSVs. See [security](docs/security.md).
 
 ## Tests And Documentation
 

@@ -185,12 +185,12 @@ def image_is_current(fingerprint, target_platform, env):
     return True
 
 
-def prepare_images(target_platform, env):
+def prepare_images(target_platform, env, target="local"):
     fingerprint = image_fingerprint()
     if not image_is_current(fingerprint, target_platform, env):
         step("镜像", "首次使用、镜像缺失或源码有变化：构建隔离镜像，可能需要联网。")
         run([VENV_PYTHON, "-m", "workers.sandbox_manager.build_images",
-             "--target", "local", "--platform", target_platform],
+             "--target", target, "--platform", target_platform],
             "镜像", "镜像构建失败，请检查 Docker、网络、磁盘与构建输出。", env=env)
         manifest = read_json(IMAGES)
         if not isinstance(manifest, dict) or not isinstance(manifest.get("images"), dict):
