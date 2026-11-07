@@ -1,16 +1,18 @@
 # AI Data Agent
 
-AI Data Agent is a sandbox-first CSV cleaning demonstration. A fixed profiler finds issues, a person approves per-column rules, an LLM generates cleaning code, and a fresh isolated Docker container executes it. An independent verifier checks the result before publication.
+AI Data Agent is a sandbox-first CSV cleaning demonstration. A fixed profiler finds issues, a person approves per-column rules, and an LLM generates cleaning code for approved changes. A fresh isolated Docker container executes the code, and an independent verifier checks the result before publication.
 
 ## Status
 
-- Vultr Serverless Inference has been exercised with `deepseek-v4.1-flash-1017` from a local machine. Local Docker and Vultr inference completed both a 50,000-row normal workflow and a controlled repair workflow.
-- The application has **not yet been deployed or accepted on a Vultr VM**.
-- This is a single-user demo for non-sensitive data, not a production or public-facing service.
+- On an Ubuntu 24.04 x86-64 Vultr VM, a browser-driven 50,000-row workflow completed through an HTTPS reverse proxy with Vultr Serverless Inference and `deepseek-v4.1-flash-1017`. Independent verification passed, and the downloaded CSV was checked against the input.
+- The temporary online demo uses a trusted TLS certificate and a shared demo token. Selected unauthenticated task requests were rejected; the deployment is not a hardened or multi-user service.
+- Selected Docker isolation, resource and failure-recovery tests also passed on that VM. These are scoped tests, not a security certification.
+- Windows local Docker and Vultr inference completed a separate 50,000-row controlled repair test using an injected failure.
+- This is a single-user demo for non-sensitive data, not a production service.
 
 ## Infrastructure
 
-The backend consists of a FastAPI service, a LangGraph Runner, a SQLite-backed queue and an independent Docker worker. The Runner connects to Vultr Serverless Inference for code generation and eligible repairs; the worker executes jobs in local Docker containers. Vultr Serverless Inference is the Vultr service exercised so far. VM deployment and sandbox behavior still require target-host acceptance; no cloud VM execution is claimed.
+The backend consists of a FastAPI service, a LangGraph Runner, a SQLite-backed queue and an independent Docker worker. The Runner connects to a configured provider for code generation and eligible repairs; the worker executes jobs in Docker containers on the same host. Vultr Serverless Inference and a Linux Vultr VM have both been exercised. See [testing](docs/testing.md) for the scope of the observed runs.
 
 ## Workflow
 
@@ -20,24 +22,32 @@ The backend consists of a FastAPI service, a LangGraph Runner, a SQLite-backed q
 4. Independently verify the candidate against the input and approved rules (D). Only verified and registered artifacts are downloadable. When every column is preserved, generation and C are skipped and D requires byte-identical output.
 5. Optionally request a model-assisted explanation. The model selects presentation order and style; the system inserts verified facts. This cannot change D's verdict or download permission.
 
-## Local Quick Start
+The supported actions are `preserve`, date normalization for selected formats, and replacing empty strings with a literal. An empty fill literal is allowed but leaves empty cells unchanged. At least one column must remain unchanged; rows are not deleted, deduplicated or reordered. D checks the approved rules, not whether every data issue was found.
 
-On Windows, install Python 3.11 or newer and Docker Desktop with its Linux engine running. The control-plane lock was validated on Windows with Python 3.12; other versions are not yet validated.
+## Quick Start
+
+On Windows, install Python 3.11 or newer and Docker Desktop with its Linux engine running:
 
 ```powershell
 python start.py
 ```
 
-The launcher prepares dependencies and the job image, offers model choices, starts API, Graph Runner and worker processes, and displays a temporary demo token. Open the local page, enter the token, upload a non-sensitive CSV, start profiling, and approve the rules. Keep the terminal open.
+On Linux, install Python with `venv`, Git and Docker Engine, then run from the project directory:
+
+```bash
+python3 start_linux.py --mode preserve
+# Or, to authorize external model calls:
+python3 start_linux.py --mode vultr --allow-external
+```
+
+Run one start command at a time. The launcher prepares dependencies and the job image, starts the API, Graph Runner and worker, and displays a private temporary demo token. Open the local page, enter the token, upload a non-sensitive CSV, start profiling, and approve the rules. Preserve mode does not call a model. In Vultr mode, supply the model ID and inference key when prompted or configure them privately as described in [operations](docs/operations.md). Startup checks key format, not remote authentication.
 
 ```powershell
 python start.py status
 python start.py stop
 ```
 
-The readiness check does not prove that Docker, the model, or the full workflow is healthy. See [operations](docs/operations.md) for model configuration and recovery. Initial setup and image builds need network access; jobs run without network access.
-
-A separate `python3 start_linux.py` foreground launcher is available for Linux. The launcher and dependency lock have not yet been accepted on a Vultr VM; see [operations](docs/operations.md) before using it.
+On Linux use `python3 start_linux.py status` or `python3 start_linux.py stop`. Keep the launcher terminal open. The API listens on `127.0.0.1` by default; remote access can use a trusted SSH tunnel or an explicitly configured HTTPS reverse proxy, as described in [operations](docs/operations.md). Readiness does not prove model authentication or the full workflow. Initial setup and image builds need network access; jobs run without network access.
 
 ## Privacy And Limits
 
