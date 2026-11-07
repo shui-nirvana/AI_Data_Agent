@@ -1,9 +1,18 @@
 """Linux launcher unit tests do not access Docker or a model provider."""
 
 import pytest
+from packaging.requirements import Requirement
 
 import start as common
 import start_linux as launcher
+
+
+def test_windows_only_requirement_is_skipped_on_linux():
+    lock = (common.ROOT / "deploy" / "control-windows.lock").read_text(encoding="utf-8")
+    line = next(line for line in lock.splitlines() if line.startswith("pywin32=="))
+    requirement = Requirement(line.removesuffix("\\").strip())
+    assert requirement.marker.evaluate({"sys_platform": "win32"})
+    assert not requirement.marker.evaluate({"sys_platform": "linux"})
 
 
 def test_linux_platform_selects_venv_and_architecture(monkeypatch):
