@@ -51,9 +51,20 @@ On Linux use `python3 start_linux.py status` or `python3 start_linux.py stop`. K
 
 ## Privacy And Limits
 
-External model requests require explicit consent and may incur charges. Generation sends anonymized column indices, approved rule summaries and aggregate statistics. Repair also sends the complete source actually executed by the failing job and limited diagnostics. Raw rows, real column names, literal fill values and raw exceptions or stacks are not deliberately sent as separate data, but anything present in the source is sent with it. Do not use sensitive data or expose this demo publicly.
+External model requests require explicit consent and may incur charges. Generation sends anonymized column indices, approved rule summaries and aggregate statistics. Repair also sends the complete source actually executed by the failing job and limited diagnostics. Raw rows, real column names, literal fill values and raw exceptions or stacks are not deliberately sent as separate data, but anything present in the source is sent with it. Use non-sensitive data and share the demo token privately with trusted users.
 
 Docker containers share the host kernel; sandboxing is not a security certification. The demo uses a shared token, not multi-user isolation. Upload, active-task and sandbox resource limits exist. An optional Nginx template provides per-IP request limits when deployed; there is no account-level monetary budget. Spreadsheet formulas may remain in exported CSVs. See [security](docs/security.md).
+
+## Future Extensions
+
+The current workflow provides a foundation for further development:
+
+- Broader fixed detection and approved cleaning actions, such as email-format and invalid-date handling.
+- Multiple compatible actions per column and additional configurable date formats.
+- User accounts, stronger access controls and isolated task ownership.
+- Enhanced spending controls, operational monitoring and deployment automation.
+
+These are extension directions, not features of the current release. New transformations should retain human approval and independent verification.
 
 ## Tests And Documentation
 

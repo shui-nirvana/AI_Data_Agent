@@ -24,9 +24,9 @@ With explicit consent, initial generation sends anonymous column indices, approv
 
 An optional validation explanation sends only allowlisted D verdict, check states and completed cell statistics. The model chooses presentation order and style; the application renders the verified facts. The explanation cannot change D's decision or publication and is a separate potentially billable call. Keys belong in the Runner environment or ignored local key files, never in Git, screenshots, logs, or containers. Proxy use is opt-in; a trusted HTTPS-intercepting proxy may see requests and credentials.
 
-## Operational Gaps
+## Operational Controls
 
-The default upload limit is 10 MiB, with an active-task cap and minimum free-disk check. An optional Nginx template adds per-IP request and connection limits when explicitly installed; the application itself has no HTTP rate limiting. These limits are not account-wide quotas and can affect users sharing an IP address. The system limits sandbox resources and model calls, but has no account-wide monetary spending cap. Operators must monitor provider billing and disk capacity. A public deployment would also need real authentication, network controls and separate security review.
+The default upload limit is 10 MiB, with an active-task cap and minimum free-disk check. An optional Nginx template adds per-IP request and connection limits when explicitly installed; the application itself has no HTTP rate limiting. These limits are not account-wide quotas and can affect users sharing an IP address. The system limits sandbox resources and model calls, but has no account-wide monetary spending cap. Operators must monitor provider billing and disk capacity. Future extensions can add stronger authentication, network controls and a separate security review for broader deployments.
 
 For a temporary online demo, share the token privately only with trusted users. HTTPS protects transport but does not provide separate identities, prevent authorized users from accessing shared tasks, or cap model spending. The launcher generates a new token on each restart. Stop exposing the demo when it is no longer needed, and keep certificates, private keys and tokens outside the repository.
 
