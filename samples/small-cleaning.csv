@@ -1,0 +1,9 @@
+record_id,order_date,email,product
+1001,2026/10/01,,Notebook
+1002,2026-10-02,morgan@example.com,Pen
+1003,2026/10/03,alex@example.com,Folder
+1004,2026-10-04,,Notebook
+1005,2026/10/05,lee@example.com,Pen
+1006,2026-10-06,river@example.com,Folder
+1007,2026/10/07,,Notebook
+1008,2026-10-08,sam@example.com,Pen

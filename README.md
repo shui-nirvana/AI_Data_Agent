@@ -36,6 +36,15 @@ Open the [online demo](https://139.180.154.243.sslip.io/) in a browser and enter
 
 The token is shared, so users with it can access the same tasks. See the [user guide](docs/operations.md) for detailed steps.
 
+### Sample CSV Files
+
+Both samples contain synthetic data. Download them from GitHub or use the files in your clone:
+
+- [Small sample](samples/small-cleaning.csv): 8 rows, suitable for a quick demonstration. Fill empty `email` cells with `UNKNOWN`, normalize `order_date` using `YYYY/MM/DD`, and preserve the remaining columns. The expected result is 3 filled cells and 4 normalized dates.
+- [Large sample](samples/large-cleaning.csv): 50,000 rows, approximately 7.14 MiB, for a larger run. Apply the same `email` and `order_date` actions and preserve `amount` and the remaining columns. The expected result is 10,000 filled cells and 10,000 normalized dates.
+
+Select only the listed date format. Invalid dates, nonempty emails, negative amounts and duplicate rows in the large sample remain unchanged; they are not automatically repaired or removed. Model-assisted runs may incur charges and their results must pass independent verification.
+
 ### Run Locally
 
 On Windows, install Python 3.11 or newer and Docker Desktop with its Linux engine running:
