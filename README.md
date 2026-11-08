@@ -26,6 +26,18 @@ The supported actions are `preserve`, date normalization for selected formats, a
 
 ## Quick Start
 
+### Online Demo
+
+Open the [online demo](https://139.180.154.243.sslip.io/) in a browser and enter the current demo token provided privately by the operator. No local installation is needed. The address is temporary; contact the operator if it is unavailable. If the browser shows a certificate warning, do not enter the token.
+
+1. Enter a business goal, choose a non-sensitive CSV, and select **Upload and register**.
+2. Select **Start fixed detection**, then review and approve the column actions.
+3. Submit the approval and, once the task reaches `SUCCEEDED`, download the validated result.
+
+The token is shared, so users with it can access the same tasks. See the [user guide](docs/operations.md) for detailed steps.
+
+### Run Locally
+
 On Windows, install Python 3.11 or newer and Docker Desktop with its Linux engine running:
 
 ```powershell

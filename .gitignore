@@ -30,6 +30,7 @@ node_modules/
 /docs/submission.md
 
 # Local experiment data, generated artifacts, screenshots, and model evidence.
+/download/
 /DeepSeek_*.txt
 /DeepSeek_*.json
 /synthetic_large_*.csv
