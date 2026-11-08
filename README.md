@@ -72,6 +72,7 @@ Docker containers share the host kernel; sandboxing is not a security certificat
 The current workflow provides a foundation for further development:
 
 - Broader fixed detection and approved cleaning actions, such as email-format and invalid-date handling.
+- Conversational analysis and cleaning: clarify user intent through dialogue, generate file-analysis code, present its findings for user decisions, and generate cleaning code for the approved rules. Eligible failures could trigger bounded repair using the actual executed source and limited diagnostics. Both stages could run in isolated containers with suitable privacy safeguards and independent verification.
 - Multiple compatible actions per column and additional configurable date formats.
 - User accounts, stronger access controls and isolated task ownership.
 - Enhanced spending controls, operational monitoring and deployment automation.
